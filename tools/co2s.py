@@ -118,11 +118,32 @@ def kd_bytes(co, kd):
 
 # ------------------------------------------------------------ disassembly
 def kernel_descriptor(mcpu, co, kd):
-    out = run([tool("llvm-objdump"), "-D", "--mcpu=" + mcpu, "--disassemble-symbols=" + kd, co])
+    # LLVM's disassembler defaults to XNACK off, whereas the assembler reserves
+    # the mask for both XNACK on and "any". Decode with the same reservation so
+    # a gfx942 object with unspecified XNACK can round-trip without narrowing
+    # its target ID. The rebuilt descriptor is still checked byte for byte.
+    gfx, *features = mcpu.split(":")
+    attrs = [("+" if f.endswith("+") else "-") + f[:-1]
+             for f in features if f.endswith(("+", "-"))]
+    if gfx == "gfx942" and not any(f.startswith("xnack") for f in features):
+        attrs.append("+xnack")
+    cmd = [tool("llvm-objdump"), "-D", "--mcpu=" + gfx]
+    if attrs:
+        cmd.append("--mattr=" + ",".join(attrs))
+    out = run(cmd + ["--disassemble-symbols=" + kd, co])
     m = re.search(r"^(\.amdhsa_kernel .*?^\.end_amdhsa_kernel)$", out, re.S | re.M)
     if not m:
         sys.exit("cannot decode kernel descriptor {}".format(kd))
-    return [l.strip() for l in m.group(1).splitlines()]
+    lines = [l.strip() for l in m.group(1).splitlines()]
+    # The encoded SGPR allocation is rounded to a granule of eight. LLVM can
+    # print 104 for gfx942's last granule, above the assembler's limit of 102.
+    # Leave room for the special SGPR reservation when XNACK is on/any.
+    # Both values encode the same final granule; compare() verifies the KD.
+    if gfx == "gfx942":
+        last = 102 if "xnack-" in features else 98
+        lines = [".amdhsa_next_free_sgpr {}".format(last) if l == ".amdhsa_next_free_sgpr 104" else l
+                 for l in lines]
+    return lines
 
 
 def _objdump(mcpu, co, start=None):

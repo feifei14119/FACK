@@ -68,6 +68,9 @@ def main():
         print("  error     : %s" % res.detail.get("error"))
         return 1
     print("  correct   : %s" % res.correct)
+    if res.correct is not True:
+        print("  error     : %s" % res.detail.get("error", "correctness validation did not pass"))
+        return 1
     if res.tflops is not None:
         print("  perf      : %.3f TFLOPS  (%.3f us)" % (res.tflops, res.time_us or 0.0))
     elif res.time_us is not None:
