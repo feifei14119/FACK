@@ -1,3 +1,7 @@
 [submodule "selfstudy"]
 	path = selfstudy
 	url = https://github.com/feifei14119/gfx_hw_prob.git
+[submodule "client/aiter/upstream"]
+	path = client/aiter/upstream
+	url = https://github.com/ROCm/aiter.git
+	branch = main

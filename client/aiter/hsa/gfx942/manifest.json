@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "arch": "gfx942",
+  "co": "fp8gemm_blockscale/fp8gemm_bf16_blockscale_BpreShuffle_32x128.co",
+  "symbol": "_ZN5aiter42fp8gemm_bf16_blockscale_BpreShuffle_32x128E",
+  "catalog": "fp8gemm_blockscale/fp8gemm_bf16_blockscale.csv",
+  "selection": {"splitK": 1, "bpreshuffle": 1},
+  "driver": "driver.py",
+  "inputs": {"m": 256, "n": 256, "k": 1024},
+  "atol": 0.05,
+  "rtol": 0.02,
+  "upstream_resources": ["csrc/py_itfs_cu/asm_a8w8_blockscale_bpreshuffle.cu"]
+}

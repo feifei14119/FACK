@@ -43,3 +43,10 @@ SDK 与 Web UI 接受 `.s` 汇编作为 seed。
 - 运行输出写到 `client/<名>/tune_out/` 或 `study_case/study_out/`，**不要直接写 `knowledge/`**；
   候选经验经人工审核后再晋升，流程见 `knowledge/README.md`。
 - 新增 skill：放在 `knowledge/skills/<name>/SKILL.md`，用相对仓库根的路径，并在本文件登记。
+
+## aiter client 依赖
+
+- `client/aiter/upstream` 是 ROCm/aiter 的固定版本 submodule；初始化使用 `bash tools/init_aiter.sh`，不自动追踪 main。
+- 适配层、manifest 和 driver 维护在 submodule 外；候选编译到 `client/aiter/tune_out/`，不覆盖上游 HSA 文件。
+- 使用架构对应的 `aiter/hsa/<gfx>` SPEC；先在目标真机验证 seed，再调优。使用说明见 [client/aiter/README.md](client/aiter/README.md)。
+- 本次接入只做静态检查；用户明确要求执行前，不运行项目、测试、构建、GPU 或模型调优。

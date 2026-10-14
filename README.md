@@ -227,3 +227,9 @@ python3.8 -m unittest discover -s unittests -t . -v
 - `reorder.parse(text)` / `parse_file(path)` -> `Program`(逐行分类: blank/comment/directive/label/instr/other)。
 - `reorder.emit(program)` / `write(program, path)` -> **逐字节无损还原**原文件。
 - 验收门: `tests/test_roundtrip.py` 对两种风格 fixtures(GEMM `label_XXXX:` / k_vadd `.label`+`.set`)验证 parse→emit 字节相等,并校验分类计数非平凡。
+
+## aiter HSA client
+
+通过 `client/aiter/upstream` submodule 接入 ROCm/aiter；先在目标机器运行 `bash tools/init_aiter.sh`。
+架构入口、seed 转换、校验与调优命令见 [client/aiter/README.md](client/aiter/README.md)。
+普通调优继续默认跳过自学，使用 selfstudy 的已有导出。

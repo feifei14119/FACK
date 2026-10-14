@@ -157,7 +157,8 @@ def list_clients() -> List[str]:
     """Every directory below client/ that holds a client.py (relative names)."""
     out = []
     for root, dirs, files in os.walk(CLIENT_ROOT):
-        dirs[:] = sorted(x for x in dirs if not x.startswith((".", "_")) and x != OUT_DIRNAME)
+        dirs[:] = sorted(x for x in dirs if not x.startswith((".", "_")) and x != OUT_DIRNAME
+                         and not os.path.exists(os.path.join(root, x, ".git")))
         if root != CLIENT_ROOT and CLIENT_FILE in files:
             out.append(os.path.relpath(root, CLIENT_ROOT).replace(os.sep, "/"))
     return out

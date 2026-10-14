@@ -13,7 +13,7 @@ client/
     fp8_blockscale_gemm/   一个 case：poc_kl/mi300/fp8_blockscale_gemm 的副本（exe、源码、seed shader）
     tune_script/           该 client 的一键调优脚本（CONFIG 块里写 CLIENT / SEED_REL / PARAMS）
     tune_out/              该 client 的全部运行输出（gitignore）
-  aiter/ ...               以后：client/aiter/client.py
+  aiter/                   HSA client，upstream/ 是 ROCm/aiter submodule；见 aiter/README.md
 ```
 
 ## 选择 client：spec
@@ -24,7 +24,7 @@ client/
 |---|---|---|
 | `poc_kl/fp8_blockscale_gemm` | `client/poc_kl/client.py` | `fp8_blockscale_gemm` |
 | `poc_kl` | `client/poc_kl/client.py` | `""`（poc_kl 会报"没有这个 case"） |
-| `aiter/moe`（示意） | `client/aiter/moe/client.py`（若有），否则 `client/aiter/client.py` | `""` 或 `moe` |
+| `aiter/hsa/gfx942` | `client/aiter/client.py` | `hsa/gfx942` |
 
 从 SPEC 目录往上找，**最近的 `client.py` 生效**。一个项目的多数 case 共用项目级 `client.py`，
 某个 case 的协议与兄弟 case 不同时，可以在 case 目录里放自己的 `client.py`
@@ -86,13 +86,13 @@ client 必须保证**评测前把候选 `.s` 装进被测程序**（例如汇编
 协议不同的项目（pytest 扫参、Python benchmark、远程机器……）自己实现 `evaluate` 即可。
 建议把输出解析写成纯函数，在 `unittests/` 里离线测试。
 
-## 新增一个 client（以 aiter 为例）
+## 新增一个 client（以 my_project 为例）
 
-1. `mkdir client/aiter`，写 `client/aiter/client.py`，实现 `make_evaluator(ctx)`。
-2. 需要随仓库携带的 case 资源（seed `.s`、小型驱动程序）放 `client/aiter/<case>/`。
+1. `mkdir client/my_project`，写 `client/my_project/client.py`，实现 `make_evaluator(ctx)`。
+2. 需要随仓库携带的 case 资源（seed `.s`、小型驱动程序）放 `client/my_project/<case>/`。
    外部仓库里的大项目不用拷贝，在 `client.py` 里用路径或环境变量指过去即可。
-3. 自检：`python3 -m client resolve aiter/<case>`，然后
-   `python3.8 tools/eval_candidate.py <seed.s> --client aiter/<case> -- <params>`。
+3. 自检：`python3 -m client resolve my_project/<case>`，然后
+   `python3.8 tools/eval_candidate.py <seed.s> --client my_project/<case> -- <params>`。
 4. 可选：仿照 `poc_kl/tune_script/` 写一键脚本。
 
 ## 输出（`<client>/tune_out/`，gitignore）
@@ -121,3 +121,8 @@ run 将解析后的路径/摘要/存在性冻结到契约，每次调用前后�
 持久化模式中 profile 是显式、另计费的调用，必须沿用同一 client 和冻结参数；profile 数据不作为
 screen/confirm/final 的性能样本。一次 evaluate 可能包含多次 launch、正确性程序内部重试与 profiling，
 框架的 eval-call 计数不等同于精确 GPU launch 数。
+
+## aiter HSA 接入
+
+已实现 submodule、独立候选编译、完整数值比较和 GPU graph 计时。初始化、seed 准备、架构入口与扩展协议见 [aiter/README.md](aiter/README.md)。
+本次只做静态检查；在目标真机校验 seed 后再开始调优。
