@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+*.pyo
+*.o
+*.co
+*.egg-info/
+.pytest_cache/
+.venv/
+build/
+dist/
+tools/sdk/cursor.config.example.json
+# per-case run products next to the kernel (ATT dumps, result hex)
+client/**/att/
+client/**/*.hex
+# all runtime outputs of a client (experiments log, induced skills for review, SDK transcripts)
+client/*/tune_out/
+# static skill-mining outputs (candidate skills for review + mine_report.md)
+study_case/study_out/
+agent/store/*.log

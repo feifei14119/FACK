@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FACK 控制台</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="console.css" />
+</head>
+<body class="console-body">
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="brand-mark">tf</div>
+      <div>
+        <div class="topbar-title">FACK 控制台</div>
+        <div class="topbar-sub">指令级 AI 辅助优化引擎 · 交互式操作面板</div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span id="health" class="health-pill">连接中…</span>
+      <a class="help-link" href="help.html">使用说明 →</a>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- 左：操作区 -->
+    <div class="panel-left">
+      <div class="tabs" id="tabs">
+        <button class="tab active" data-tab="tune">调优</button>
+        <button class="tab" data-tab="learn">学习 / 挖掘</button>
+        <button class="tab" data-tab="verify">测试 / 验证</button>
+        <button class="tab" data-tab="results">结果 / 技能</button>
+      </div>
+
+      <!-- 调优 -->
+      <section class="tabpane active" id="pane-tune">
+        <div class="card">
+          <h3>自定义调优 <span class="need">需 GPU + API key</span></h3>
+          <p class="desc">用 <code>tune.mjs</code> 起本地 Cursor agent，observe→propose→eval 真机闭环把 seed kernel 调快。参数在 <code>--</code> 之后原样透传给被测程序。</p>
+          <div class="form" id="tuneForm">
+            <label>seed 路径（.s 汇编）
+              <input name="seed" data-def="seed" />
+            </label>
+            <label>调优 client（--client，client/ 下的路径）
+              <input name="client" data-def="client" />
+            </label>
+            <label>透传参数（-- 之后，如 m=2560 n=2560 k=256）
+              <input name="params" data-def="params" />
+            </label>
+            <div class="form-row">
+              <label>区域 region
+                <select name="region">
+                  <option value="loop">loop（主循环，默认）</option>
+                  <option value="prologue">prologue</option>
+                  <option value="epilogue">epilogue</option>
+                  <option value="inter">inter</option>
+                  <option value="all">all / auto（跨区）</option>
+                </select>
+              </label>
+              <label>轮数 rounds
+                <input name="rounds" type="number" min="1" max="100" value="5" />
+              </label>
+              <label>测量循环 loop
+                <input name="loop" type="number" min="1" max="1000" value="20" />
+              </label>
+            </div>
+            <label>模型 model（可空，默认 auto）
+              <input name="model" placeholder="auto 或 claude-opus-5-5,effort=medium" />
+            </label>
+            <label>CURSOR_API_KEY（可空，仅本次运行用，不保存）
+              <input name="apikey" type="password" placeholder="留空则用 env / cursor.config.json" />
+            </label>
+            <label class="check"><input type="checkbox" name="transcript" /> 保存完整 transcript（提示词+LLM输出）</label>
+            <button class="btn primary" data-action="tune">▶ 开始调优</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>一键脚本（用脚本内 CONFIG 块）</h3>
+          <p class="desc">直接运行仓库入口脚本，参数取脚本顶部 CONFIG（不使用上面的表单）。</p>
+          <div class="btn-row">
+            <button class="btn" data-action="tune_quick">▶ 快跑 tune_quick.sh</button>
+            <button class="btn" data-action="tune_tail">▶ 尾段 tune_prologue_epilogue.sh</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 学习 -->
+      <section class="tabpane" id="pane-learn">
+        <div class="card">
+          <h3>静态挖掘（Layer 1）<span class="ok">无需 GPU</span></h3>
+          <p class="desc">从 gold（人工调好）kernel 语料静态挖出按区域的调优先验，产物一律 candidate。</p>
+          <div class="form" id="mineForm">
+            <label>语料目录 --corpus
+              <input name="corpus" data-def="corpus" />
+            </label>
+            <label>产出目录 --out
+              <input name="out" data-def="out" />
+            </label>
+            <button class="btn primary" data-action="mine">⛏ 开始学习（挖掘）</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>完整挖掘流水线</h3>
+          <p class="desc"><code>mine_skills.sh</code>：清空旧 skill → Layer 1 静态挖掘 → Layer 2 离线 AI 归纳（需 Node + API key，否则自动跳过）。</p>
+          <div class="btn-row">
+            <button class="btn" data-action="mine_full">⛏ 运行 mine_skills.sh (L1+L2)</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Layer 2 离线 AI 归纳 <span class="need">需 API key</span></h3>
+          <p class="desc"><code>articulate.mjs</code>：无头 Cursor agent 读简报→产 ai_proposal.json→闸门摄入 ai-*.json。</p>
+          <div class="form" id="articulateForm">
+            <label>CURSOR_API_KEY（可空）
+              <input name="apikey" type="password" placeholder="留空则用 env / cursor.config.json" />
+            </label>
+            <label class="check"><input type="checkbox" name="dry" /> --dry-run（只打印不落盘）</label>
+            <button class="btn primary" data-action="articulate">🧠 运行 articulate.mjs</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 验证 -->
+      <section class="tabpane" id="pane-verify">
+        <div class="card">
+          <h3>单元测试 <span class="ok">无需 GPU</span></h3>
+          <p class="desc">标准库 unittest，零安装。</p>
+          <div class="btn-row">
+            <button class="btn primary" data-action="test">✓ 运行全部单元测试</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>真机验证 hw_validate.sh <span class="need">需 GPU</span></h3>
+          <p class="desc">构建候选 .s → .co，在若干 k 值上跑 N 次，统计 PASS/FAIL。</p>
+          <div class="form" id="hwForm">
+            <label>候选 .s 路径
+              <input name="candidate" placeholder="client/poc_kl/tune_out/tune_result/xxx.best_tf48.xxx.s" />
+            </label>
+            <div class="form-row">
+              <label>运行次数 runs
+                <input name="runs" type="number" min="1" max="200" value="10" />
+              </label>
+              <label>k 值（空格分隔，可空）
+                <input name="ks" placeholder="512 2048 4096" />
+              </label>
+            </div>
+            <button class="btn primary" data-action="hw_validate">✔ 开始真机验证</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 结果 -->
+      <section class="tabpane" id="pane-results">
+        <div class="card">
+          <div class="card-head-row">
+            <h3>调优结果汇总</h3>
+            <button class="btn tiny" id="refreshResults">刷新</button>
+          </div>
+          <p class="desc">读取各 client 的 <code>client/&lt;name&gt;/tune_out/tune_result/*.summary.json</code>。</p>
+          <div id="resultsBox" class="results-box">尚未加载。</div>
+        </div>
+        <div class="card">
+          <div class="card-head-row">
+            <h3>技能库</h3>
+            <button class="btn tiny" id="refreshSkills">刷新</button>
+          </div>
+          <p class="desc">策展库 <code>knowledge/engine/skills</code> 与挖掘产出 <code>study_case/study_out/skills</code>。</p>
+          <div id="skillsBox" class="results-box">尚未加载。</div>
+        </div>
+      </section>
+    </div>
+
+    <!-- 右：运行监控 -->
+    <div class="panel-right">
+      <div class="monitor">
+        <div class="monitor-head">
+          <span class="mon-title">运行监控</span>
+          <div class="mon-actions">
+            <button class="btn tiny" id="autoscrollBtn" title="自动滚到底部">⤓ 跟随</button>
+            <button class="btn tiny danger" id="stopBtn" disabled>■ 停止</button>
+          </div>
+        </div>
+        <div class="job-tabs" id="jobTabs"></div>
+        <div class="log-view" id="logView"><span class="log-empty">点击左侧按钮启动一个作业，输出会实时显示在这里。</span></div>
+        <div class="monitor-foot" id="monitorFoot"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast">已复制</div>
+  <script src="console.js"></script>
+</body>
+</html>

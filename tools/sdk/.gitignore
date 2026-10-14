@@ -1,0 +1,8 @@
+node_modules/
+package-lock.json
+
+# plaintext API key -- never commit. Keep it 0600.
+cursor.config.json
+
+# per-run LLM I/O transcripts
+transcripts/

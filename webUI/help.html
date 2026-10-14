@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FACK 使用手册 · 帮助</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <button id="menuToggle" class="menu-toggle" aria-label="菜单">☰</button>
+
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">tf</div>
+      <div class="brand-text">
+        <div class="brand-title">FACK</div>
+        <div class="brand-sub">使用手册 · 帮助</div>
+      </div>
+    </div>
+
+    <a class="back-console" href="index.html">← 返回控制台</a>
+
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="搜索命令 / 参数 / 用法…" autocomplete="off" />
+      <span class="search-hint">/</span>
+    </div>
+
+    <nav class="nav" id="nav"></nav>
+
+    <div class="sidebar-foot">
+      <div class="lan-tip" id="lanTip"></div>
+    </div>
+  </aside>
+
+  <main class="content" id="content">
+    <header class="hero" id="hero"></header>
+    <div id="sections"></div>
+    <footer class="page-foot">
+      <span>FACK · 指令级 AI 辅助优化引擎</span>
+      <span id="noResults" class="no-results" hidden>没有匹配的结果</span>
+    </footer>
+  </main>
+
+  <div class="toast" id="toast">已复制</div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

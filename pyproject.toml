@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "FACK"
+version = "0.0.1"
+description = "Architecture-pluggable, instruction-level AI-assisted AMDGPU kernel reorder engine (fully self-contained)."
+requires-python = ">=3.8"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=6.0"]
+
+[tool.setuptools]
+packages = ["reorder", "isa", "isa.gfx942", "harness", "analysis", "agent", "search"]
+
+[tool.pytest.ini_options]
+testpaths = ["unittests"]

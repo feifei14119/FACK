@@ -1,0 +1,14 @@
+{
+  "name": "fack-agent-tuner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Drive the FACK fixed-logic engine with a programmatic Cursor agent (M7 meta-layer tuner).",
+  "scripts": {
+    "tune": "node tune.mjs",
+    "articulate": "node articulate.mjs"
+  },
+  "dependencies": {
+    "@cursor/sdk": "^1.0.18"
+  }
+}

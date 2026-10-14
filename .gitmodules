@@ -1,0 +1,3 @@
+[submodule "selfstudy"]
+	path = selfstudy
+	url = https://github.com/feifei14119/gfx_hw_prob.git
