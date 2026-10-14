@@ -20,6 +20,9 @@ knowledge/
 `selfstudy/gfx942/mfma_issue/skills_out/skills/mfma-interleave-gfx942/` 的相对软链接。
 直接引用已锁定的上游导出，不复制、重新生成或手改其中的内容。
 
+`skills/aiter-gfx942-validation/` 保存经用户同意整理的 aiter 操作流程，链接 `client/aiter/` 中维护的
+Docker、op_test 脚本与验证记录。操作经验不作为引擎的指令调度先验；新实验输出继续保留在 client 的 `tune_out/`。
+
 ## skills/：给 Agent 读的经验
 
 格式遵循通用的 SKILL.md 约定：

@@ -1,0 +1,393 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-14",
+  "purpose": "portable_workflow_same_seed_comparison",
+  "scope": "Fresh checkout and container on the original host/image; no second-machine or registry-pull validation; no new tuning candidate.",
+  "base_commit": "2734e37435f25fc9b489779703b7e7c6facf8720",
+  "workflow_source_sha256": {
+    "client/aiter/client.py": "34d742e3e9975611dde863eee561c292b9074b2bcef4452e90e5f05ec5ca8d19",
+    "client/aiter/common.py": "66ab64fc786d9f9126a5fcf04c82f8b6194ee318208c011c5044335a67f23507",
+    "client/aiter/runner.py": "789ff126b1dc56f702efdced32220b333cc1fdf0d80cc6da77ffd6349429493f",
+    "client/aiter/docker_env.py": "b7d75242e3715070818ab148979fe7dfd394f965107f07735a40e9c8f4dbd2e9",
+    "client/aiter/doctor.py": "9b7fa4e85c7b463676ab6ee3be7b239ed2e77232cfae79c3d51284099a9bbe5b",
+    "client/aiter/compare.py": "45a6e80c47d815a792d28fa0cb2745d7a76f4fdd0609899d79e97cd62a7f7f30",
+    "client/aiter/env/gfx942.json": "435a549a7c3c3c01d3e33e86103cd11143ff49cfe1b04f1c52e46ba9f3cc222f",
+    "client/aiter/hsa/gfx942/driver.py": "3b3f339bb8f41fe57fdfd092e9dff42e049a2ac4c07ba67b30e82263291a9ec5",
+    "client/aiter/hsa/gfx942/optest_driver.py": "591fee55b1349f1567157d11484094954a550a1f04ce6e9eabf875ed14f434e2",
+    "client/aiter/hsa/gfx942/optest_manifest.json": "6871414e0a83521388067fed663fab5572043dde64c3b5c11792dc5ae2795ee2"
+  },
+  "submodules": {
+    "client/aiter/upstream": "2abf8aaa44f9d81c88d6153024b21e6931c7f906",
+    "client/aiter/upstream/3rdparty/composable_kernel": "96afae1d54fc79c26857de7e1683b0dde1ff3c6f",
+    "selfstudy": "16a0a16214374e8d99e462102b41a26a76622b9c"
+  },
+  "setup": {
+    "fresh_clone": true,
+    "historical_tune_out_copied": false,
+    "host_path_contains_spaces": true,
+    "host_repo": "/data/feifei/FACK/client/aiter/tune_out/portability-20261014/checkout with spaces",
+    "container_repo": "/workspace/FACK",
+    "host_python": "3.8.17 (default, May  7 2024, 10:44:04) \n[GCC 10.2.1 20200825 (Alibaba 10.2.1-3.8 2.32)]",
+    "uid": 10708,
+    "foreign_owned_output_paths": []
+  },
+  "environment": {
+    "image_ref": "rocm/atom-dev@sha256:c7a29446b588a1c85aead74be2c9c7e40a84d6d8817215df4da6ac3f50131bf5",
+    "image_id": "sha256:9a552595768e89aa2b55892a031011a042ecc14b7613598bb98b248d2a3e7377",
+    "repo_digests": [
+      "rocm/atom-dev@sha256:c7a29446b588a1c85aead74be2c9c7e40a84d6d8817215df4da6ac3f50131bf5"
+    ],
+    "selected_gpu": {
+      "index": 6,
+      "pci": "0001:a5:00.0",
+      "uuid": "GPU-460ffdd2f4d1f04a",
+      "arch": "gfx942",
+      "name": "AMD Instinct MI308X"
+    },
+    "doctor": {
+      "schema_version": 1,
+      "python": "3.12.3 (main, Mar 23 2026, 19:04:32) [GCC 13.3.0]",
+      "executable": "/opt/venv/bin/python3",
+      "modules": {
+        "torch": "2.10.0+rocm7.2.4.git3d3aa833",
+        "triton": "3.7.0",
+        "pandas": "2.3.3",
+        "numpy": "2.3.5",
+        "ninja": "1.13.0",
+        "pybind11": "3.0.4",
+        "einops": "0.8.2",
+        "psutil": "7.0.0",
+        "packaging": "26.2",
+        "yaml": "6.0.3"
+      },
+      "errors": [],
+      "tools": {
+        "clang": "/opt/rocm/llvm/bin/clang",
+        "ld.lld": "/opt/rocm/llvm/bin/ld.lld",
+        "llvm-readelf": "/opt/rocm/llvm/bin/llvm-readelf",
+        "llvm-objdump": "/opt/rocm/llvm/bin/llvm-objdump"
+      },
+      "aiter_commit": "2abf8aaa44f9d81c88d6153024b21e6931c7f906",
+      "hip": "7.2.53211",
+      "visible_devices": 1,
+      "device": {
+        "name": "AMD Instinct MI308X",
+        "arch": "gfx942",
+        "pci": "0001:a5:00.0",
+        "uuid": "34363066-6664-6432-6634-643166303461"
+      },
+      "visibility": {
+        "ROCR_VISIBLE_DEVICES": "GPU-460ffdd2f4d1f04a",
+        "HIP_VISIBLE_DEVICES": "0",
+        "CUDA_VISIBLE_DEVICES": "0",
+        "GPU_DEVICE_ORDINAL": "0"
+      },
+      "ok": true
+    }
+  },
+  "round_trip": {
+    "text_bytes": 5984,
+    "text": "identical",
+    "kernel_descriptor": "identical_except_link_entry_offset",
+    "metadata": "identical",
+    "elf_flags": "identical",
+    "exact": true
+  },
+  "assemblies_sha256": {
+    "reference": "0f4fdcb5d99dd897bd58028992a3205f5e230d2d90b6447928e6fefdaa266b56",
+    "candidate": "0f4fdcb5d99dd897bd58028992a3205f5e230d2d90b6447928e6fefdaa266b56"
+  },
+  "params": [
+    "--manifest",
+    "client/aiter/hsa/gfx942/optest_manifest.json",
+    "--python",
+    "/opt/venv/bin/python3",
+    "--m",
+    "256",
+    "--n",
+    "256",
+    "--k",
+    "1024",
+    "--warmup",
+    "5",
+    "--iters",
+    "20",
+    "--samples",
+    "3",
+    "--seed",
+    "987"
+  ],
+  "policy": {
+    "method": "paired_sign_v1",
+    "confirm_pairs": 6,
+    "final_pairs": 6,
+    "min_gain": 0.01,
+    "alpha": 0.05,
+    "max_confirmations": 1
+  },
+  "validation": {
+    "evaluations": 12,
+    "compiled_and_correct": 12,
+    "loader_observed": 12,
+    "basic_full_output_checks": 36,
+    "op_test_rows": 24,
+    "op_test_full_output_checks": 96,
+    "op_test_asm_checks": 24,
+    "op_test_error_ratios": [
+      0
+    ],
+    "op_test_seed": 987
+  },
+  "samples": [
+    {
+      "trial": 0,
+      "side": "reference",
+      "times_us": {
+        "hip_graph": 7.414049655199051,
+        "op_test:constant/constant": 7.101282828282823,
+        "op_test:uniform/auto": 7.057749999999975
+      },
+      "co_sha256": "c635139385761db0ffaa8d27519ad937afedda497a91ab24f801b0a3511c5846"
+    },
+    {
+      "trial": 0,
+      "side": "candidate",
+      "times_us": {
+        "hip_graph": 7.366000115871429,
+        "op_test:constant/constant": 7.411161616161636,
+        "op_test:uniform/auto": 7.376828282828248
+      },
+      "co_sha256": "c635139385761db0ffaa8d27519ad937afedda497a91ab24f801b0a3511c5846"
+    },
+    {
+      "trial": 1,
+      "side": "candidate",
+      "times_us": {
+        "hip_graph": 7.352049648761749,
+        "op_test:constant/constant": 7.050071428571384,
+        "op_test:uniform/auto": 7.0741515151514935
+      },
+      "co_sha256": "c635139385761db0ffaa8d27519ad937afedda497a91ab24f801b0a3511c5846"
+    },
+    {
+      "trial": 1,
+      "side": "reference",
+      "times_us": {
+        "hip_graph": 7.334049791097641,
+        "op_test:constant/constant": 7.0806597938144185,
+        "op_test:uniform/auto": 7.079858585858578
+      },
+      "co_sha256": "c635139385761db0ffaa8d27519ad937afedda497a91ab24f801b0a3511c5846"
+    },
+    {
+      "trial": 2,
+      "side": "reference",
+      "times_us": {
+        "hip_graph": 7.367999851703644,
+        "op_test:constant/constant": 7.0719375,
+        "op_test:uniform/auto": 7.042329896907224
+      },
+      "co_sha256": "c635139385761db0ffaa8d27519ad937afedda497a91ab24f801b0a3511c5846"
+    },
+    {
+      "trial": 2,
+      "side": "candidate",
+      "times_us": {
+        "hip_graph": 7.328049838542938,
+        "op_test:constant/constant": 7.102714285714274,
+        "op_test:uniform/auto": 7.076947368421067
+      },
+      "co_sha256": "c635139385761db0ffaa8d27519ad937afedda497a91ab24f801b0a3511c5846"
+    },
+    {
+      "trial": 3,
+      "side": "candidate",
+      "times_us": {
+        "hip_graph": 7.425999641418457,
+        "op_test:constant/constant": 7.413989898989891,
+        "op_test:uniform/auto": 7.380828282828269
+      },
+      "co_sha256": "c635139385761db0ffaa8d27519ad937afedda497a91ab24f801b0a3511c5846"
+    },
+    {
+      "trial": 3,
+      "side": "reference",
+      "times_us": {
+        "hip_graph": 7.329999655485153,
+        "op_test:constant/constant": 7.062468085106359,
+        "op_test:uniform/auto": 7.084282828282806
+      },
+      "co_sha256": "c635139385761db0ffaa8d27519ad937afedda497a91ab24f801b0a3511c5846"
+    },
+    {
+      "trial": 4,
+      "side": "reference",
+      "times_us": {
+        "hip_graph": 7.372049987316132,
+        "op_test:constant/constant": 7.410747474747463,
+        "op_test:uniform/auto": 7.432151515151519
+      },
+      "co_sha256": "c635139385761db0ffaa8d27519ad937afedda497a91ab24f801b0a3511c5846"
+    },
+    {
+      "trial": 4,
+      "side": "candidate",
+      "times_us": {
+        "hip_graph": 7.320050150156021,
+        "op_test:constant/constant": 7.092343434343425,
+        "op_test:uniform/auto": 7.06286868686869
+      },
+      "co_sha256": "c635139385761db0ffaa8d27519ad937afedda497a91ab24f801b0a3511c5846"
+    },
+    {
+      "trial": 5,
+      "side": "candidate",
+      "times_us": {
+        "hip_graph": 7.448049634695053,
+        "op_test:constant/constant": 7.083365591397846,
+        "op_test:uniform/auto": 7.108010204081643
+      },
+      "co_sha256": "c635139385761db0ffaa8d27519ad937afedda497a91ab24f801b0a3511c5846"
+    },
+    {
+      "trial": 5,
+      "side": "reference",
+      "times_us": {
+        "hip_graph": 7.348050177097321,
+        "op_test:constant/constant": 7.0945161290322725,
+        "op_test:uniform/auto": 7.104878787878763
+      },
+      "co_sha256": "c635139385761db0ffaa8d27519ad937afedda497a91ab24f801b0a3511c5846"
+    }
+  ],
+  "results": {
+    "hip_graph": {
+      "method": "paired_sign_v1",
+      "verdict": "inconclusive",
+      "pairs": 6,
+      "alpha_one_sided": 0.05,
+      "lower_rank": 1,
+      "min_gain": 0.01,
+      "log_tolerance": 1e-12,
+      "log_ratios": [
+        0.006501968443766604,
+        -0.002451279422545527,
+        0.005436850366010937,
+        -0.013011838569682244,
+        0.007078641420047216,
+        -0.013517208113104084
+      ],
+      "median_log_ratio": 0.001492785471732705,
+      "lower_log_bound": -0.013517208113104084,
+      "upper_log_bound": 0.007078641420047216,
+      "median_ratio": 1.0014939002305947,
+      "lower_ratio_bound": 0.9865737390991721,
+      "upper_ratio_bound": 1.0071037542220942,
+      "scope": "client_reported_scores; iid_pair_assumption_not_hardware_verified",
+      "reference_median_us": 7.358025014400482,
+      "reference_range_us": [
+        7.329999655485153,
+        7.414049655199051
+      ],
+      "candidate_median_us": 7.359024882316589,
+      "candidate_range_us": [
+        7.320050150156021,
+        7.448049634695053
+      ]
+    },
+    "op_test:constant/constant": {
+      "method": "paired_sign_v1",
+      "verdict": "inconclusive",
+      "pairs": 6,
+      "alpha_one_sided": 0.05,
+      "lower_rank": 1,
+      "min_gain": 0.01,
+      "log_tolerance": 1e-12,
+      "log_ratios": [
+        -0.04271174257014043,
+        0.004329346095217845,
+        -0.004342517127595258,
+        -0.048574164764449534,
+        0.04391549536784023,
+        0.0015729486468183396
+      ],
+      "median_log_ratio": -0.0013847842403884592,
+      "lower_log_bound": -0.048574164764449534,
+      "upper_log_bound": 0.04391549536784023,
+      "median_ratio": 0.9986161741308776,
+      "lower_ratio_bound": 0.9525866883186035,
+      "upper_ratio_bound": 1.044894052769952,
+      "scope": "client_reported_scores; iid_pair_assumption_not_hardware_verified",
+      "reference_median_us": 7.0875879614233455,
+      "reference_range_us": [
+        7.062468085106359,
+        7.410747474747463
+      ],
+      "candidate_median_us": 7.0975288600288495,
+      "candidate_range_us": [
+        7.050071428571384,
+        7.413989898989891
+      ]
+    },
+    "op_test:uniform/auto": {
+      "method": "paired_sign_v1",
+      "verdict": "inconclusive",
+      "pairs": 6,
+      "alpha_one_sided": 0.05,
+      "lower_rank": 1,
+      "min_gain": 0.01,
+      "log_tolerance": 1e-12,
+      "log_ratios": [
+        -0.044217470432795114,
+        0.0008064246069690029,
+        -0.0049035853930021744,
+        -0.04100722169552862,
+        0.05096408960436394,
+        -0.000440644580467886
+      ],
+      "median_log_ratio": -0.0026721149867350302,
+      "lower_log_bound": -0.044217470432795114,
+      "upper_log_bound": 0.05096408960436394,
+      "median_ratio": 0.997331451934734,
+      "lower_ratio_bound": 0.9567458709089077,
+      "upper_ratio_bound": 1.0522851046302761,
+      "scope": "client_reported_scores; iid_pair_assumption_not_hardware_verified",
+      "reference_median_us": 7.082070707070692,
+      "reference_range_us": [
+        7.042329896907224,
+        7.432151515151519
+      ],
+      "candidate_median_us": 7.092478786251355,
+      "candidate_range_us": [
+        7.06286868686869,
+        7.380828282828269
+      ]
+    }
+  },
+  "failed_attempts": [
+    {
+      "report": "/data/feifei/FACK/client/aiter/tune_out/portability-20261014/checkout with spaces/client/aiter/tune_out/comparisons/paired-y_pj6qdv/comparison.json",
+      "record_count": 1,
+      "last_error_line": "KeyError: 'getpwuid(): uid not found: 10708'"
+    },
+    {
+      "report": "/data/feifei/FACK/client/aiter/tune_out/portability-20261014/checkout with spaces/client/aiter/tune_out/comparisons/paired-kqd6yse8/comparison.json",
+      "record_count": 1,
+      "last_error_line": "PermissionError: [Errno 13] Permission denied: '//.aiter'"
+    }
+  ],
+  "checks": {
+    "cpu_passed": 658,
+    "cpu_subtests_passed": 19,
+    "cpu_seconds": 79.16,
+    "skill_validator": "passed",
+    "python_3_8_syntax_files": 7,
+    "remote_local_runtime_hash_matches": 10
+  },
+  "cleanup": {
+    "fack-aiter-portability-20261014": "exited",
+    "fack-aiter-portability-20261014-v2": "exited"
+  },
+  "raw_comparison": "/data/feifei/FACK/client/aiter/tune_out/portability-20261014/checkout with spaces/client/aiter/tune_out/comparisons/paired-40jodnsw/comparison.json",
+  "raw_evidence_sha256": "93913a2c2643a12e5e5781c29ed543e73500291003188002efaf715e2d7015eb"
+}

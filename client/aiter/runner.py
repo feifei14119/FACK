@@ -24,6 +24,17 @@ def loader_observed(request):
     return bool(paths) and all(Path(path).resolve() == Path(request["co_path"]).resolve() for path in paths)
 
 
+def validate_driver(driver, request):
+    """Run an explicitly requested validation stage once, outside GPU timing."""
+    hook = getattr(driver, "validate", None)
+    if not callable(hook):
+        raise ValueError("manifest requires a driver.validate hook")
+    result = hook(dict(request["inputs"]), request["symbol"], request["seed"])
+    if not isinstance(result, dict) or result.get("correct") is not True:
+        raise ValueError("driver validation did not pass")
+    return result
+
+
 def execute(request, report):
     import torch
 
@@ -106,6 +117,10 @@ def execute(request, report):
     flops = case["flops"]
     if type(flops) not in (int, float) or not math.isfinite(flops) or flops <= 0:
         raise ValueError("driver must supply a positive FLOP count per run()")
+    if request.get("validation_hook"):
+        report["op_test"] = validate_driver(driver, request)
+        if not loader_observed(request):
+            raise RuntimeError("validation hook loaded an unexpected candidate path")
     # Warm up on a side stream, capture repeated launches, and time graph replay
     # to keep Python/ctypes launch overhead out of short-kernel comparisons.
     stream = torch.cuda.Stream()

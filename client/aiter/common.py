@@ -38,6 +38,8 @@ def load_manifest(path, arch):
         raise ValueError("missing Python driver: {}".format(driver))
     if not isinstance(data["inputs"], dict):
         raise ValueError("inputs must be an object")
+    if "validation_hook" in data and type(data["validation_hook"]) is not bool:
+        raise ValueError("validation_hook must be a boolean")
     for key in ("atol", "rtol"):
         if type(data[key]) not in (int, float) or not math.isfinite(data[key]) or data[key] < 0:
             raise ValueError("{} must be finite and nonnegative".format(key))

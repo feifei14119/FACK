@@ -1,0 +1,173 @@
+{
+  "outcome": "original_retained",
+  "shape": {
+    "m": 256,
+    "n": 256,
+    "k": 1024
+  },
+  "gpu": 6,
+  "screening": [
+    {
+      "name": "original",
+      "tflops": 20.3223473430884,
+      "time_us": 6.604440212249756,
+      "correct": true
+    },
+    {
+      "name": "normalized",
+      "tflops": 20.316195871721664,
+      "time_us": 6.60643994808197,
+      "correct": true
+    },
+    {
+      "name": "scale_early",
+      "tflops": 20.179354252413006,
+      "time_us": 6.651239991188049,
+      "correct": true
+    },
+    {
+      "name": "scale_early_both",
+      "tflops": 19.96443862832156,
+      "time_us": 6.722840070724487,
+      "correct": true
+    },
+    {
+      "name": "lds_later",
+      "tflops": 20.268334605634667,
+      "time_us": 6.622040271759033,
+      "correct": true
+    }
+  ],
+  "comparison": {
+    "constant": {
+      "times_us": {
+        "baseline": [
+          7.1398775510203984,
+          7.435397959183714,
+          7.103894736842111,
+          7.421272727272736,
+          7.119828282828288
+        ],
+        "candidate": [
+          6.9123541666666695,
+          6.921112244897977,
+          7.220444444444427,
+          6.9166161616161626,
+          6.90691919191919
+        ]
+      },
+      "baseline_median_us": 7.1398775510203984,
+      "candidate_median_us": 6.9166161616161626,
+      "paired_speedups": [
+        1.032915469732571,
+        1.0743068015787276,
+        0.9838583748550283,
+        1.0729629278052426,
+        1.0308254787689124
+      ],
+      "paired_median_gain_pct": 3.291546973257109,
+      "bootstrap95_gain_pct": [
+        -1.614162514497175,
+        7.43068015787276
+      ],
+      "sign_test_p_above_1pct": 0.1875
+    },
+    "uniform": {
+      "times_us": {
+        "baseline": [
+          7.05008510638298,
+          7.416946808510675,
+          7.05395744680851,
+          7.387707070707064,
+          7.079050505050517
+        ],
+        "candidate": [
+          6.891989898989913,
+          6.8721122448980045,
+          7.217329787234048,
+          6.897656565656553,
+          6.905282828282843
+        ]
+      },
+      "baseline_median_us": 7.079050505050517,
+      "candidate_median_us": 6.897656565656553,
+      "paired_speedups": [
+        1.022938978395229,
+        1.0792819651653924,
+        0.9773638803765751,
+        1.0710459415289642,
+        1.0251644546775045
+      ],
+      "paired_median_gain_pct": 2.51644546775045,
+      "bootstrap95_gain_pct": [
+        -2.2636119623424933,
+        7.928196516539243
+      ],
+      "sign_test_p_above_1pct": 0.1875
+    },
+    "graph": {
+      "times_us": {
+        "baseline": [
+          6.632840037345886,
+          6.6164398193359375,
+          6.640440225601196,
+          6.604440212249756,
+          6.5948402881622314
+        ],
+        "candidate": [
+          6.622440218925476,
+          6.637639999389648,
+          6.640840172767639,
+          6.622440218925476,
+          6.581240296363831
+        ]
+      },
+      "baseline_median_us": 6.6164398193359375,
+      "candidate_median_us": 6.622440218925476,
+      "paired_speedups": [
+        1.0015703906832847,
+        0.996806066605652,
+        0.9999397746134469,
+        0.9972819676613645,
+        1.0020664785338282
+      ],
+      "paired_median_gain_pct": -0.006022538655314769,
+      "bootstrap95_gain_pct": [
+        -0.31939333943480364,
+        0.2066478533828242
+      ],
+      "sign_test_p_above_1pct": 1.0
+    }
+  },
+  "sha256": {
+    "upstream.co": "3d1acfd1e5bf6f16816334d8aede37f93af0cbb3f0d6030dddb1deacf7e38d8f",
+    "seed.s": "0f4fdcb5d99dd897bd58028992a3205f5e230d2d90b6447928e6fefdaa266b56",
+    "baseline.co": "c635139385761db0ffaa8d27519ad937afedda497a91ab24f801b0a3511c5846",
+    "candidate.s": "a685acfb2c42bde899f0ff53ba5fdd1a345a9e3dd62796e7b1f7ba77631b02e5",
+    "candidate.co": "9df8d88066e3e5ca51065042028089eacb68750b307bcc9ba4d7ae71e03922e3"
+  },
+  "schema_version": 1,
+  "date": "2026-10-14",
+  "aiter_commit": "2abf8aaa44f9d81c88d6153024b21e6931c7f906",
+  "device": {
+    "name": "MI308X",
+    "arch": "gfx942",
+    "pci": "0001:A5:00.0",
+    "uuid": "0x460ffdd2f4d1f04a"
+  },
+  "environment": {
+    "python": "3.12.3 (main, Mar 23 2026, 19:04:32) [GCC 13.3.0]",
+    "executable": "/opt/venv/bin/python3",
+    "torch": "2.10.0+rocm7.2.4.git3d3aa833",
+    "triton": "3.7.0",
+    "hip": "7.2.53211"
+  },
+  "image_repo_digest": "rocm/atom-dev@sha256:c7a29446b588a1c85aead74be2c9c7e40a84d6d8817215df4da6ac3f50131bf5",
+  "evidence_scope": "historical adapter in tune_out; formal portable entry points validated separately",
+  "op_test_asm_checks": 20,
+  "op_test_asm_error_ratios": [
+    0
+  ],
+  "cpu_tests": 649,
+  "cpu_subtests": 19
+}

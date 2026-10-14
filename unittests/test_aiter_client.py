@@ -77,6 +77,10 @@ class TestAiterProtocol(unittest.TestCase):
             for mode in ("pass", "missing_load", "numerical_fail", "artifact_change", "crash", "bad_time"):
                 def fake_process(argv, log, timeout, env=None, cwd=None):
                     if "request.json" in str(argv):
+                        cache = Path(env["AITER_ROOT_DIR"])
+                        self.assertTrue(cache.is_absolute())
+                        cache.relative_to(root / "out")
+                        self.assertEqual(cache.parent, Path(env["AITER_JIT_DIR"]))
                         request = json.loads(Path(argv[-2]).read_text())
                         if mode == "crash":
                             raise RuntimeError("runner failed")

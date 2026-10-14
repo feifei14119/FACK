@@ -136,7 +136,11 @@ class AiterEvaluator:
             cache_inputs = {k: v for k, v in evidence.data["identity_before"]["resources"].items()
                             if k.startswith("upstream") or k in ("catalog", "python", "assembler", "linker")}
             cache_key = hashlib.sha256(json.dumps(cache_inputs, sort_keys=True).encode()).hexdigest()[:20]
-            env.update(AITER_META_DIR=str(UPSTREAM), AITER_JIT_DIR=str(Path(self.ctx.out_dir) / "jit" / config["arch"] / cache_key),
+            cache_dir = Path(self.ctx.out_dir).resolve() / "jit" / config["arch"] / cache_key
+            # aiter's cpp_itfs cache is separate from its legacy JIT cache.
+            # Both must be writable even when the container UID has no home.
+            env.update(AITER_META_DIR=str(UPSTREAM), AITER_JIT_DIR=str(cache_dir),
+                       AITER_ROOT_DIR=str(cache_dir / "cpp_itfs"),
                        AITER_ASM_DIR=str(stage), AITER_LOG_LEVEL="INFO", AITER_AOT_IMPORT="0",
                        AITER_TRITON_ONLY="0", GPU_ARCHS=config["arch"], PYTHONDONTWRITEBYTECODE="1")
             run_process([opts.python, "-B", str(HERE / "runner.py"), str(work / "request.json"),
@@ -145,6 +149,8 @@ class AiterEvaluator:
             result.detail["runner"] = report
             if report.get("error"):
                 raise ValueError(report["error"])
+            if config.get("validation_hook") and report.get("op_test", {}).get("correct") is not True:
+                raise ValueError("runner did not report the required driver validation")
             if (report.get("schema_version") != 1 or report.get("co_sha256") != request["co_sha256"] or
                     report.get("arch") != config["arch"] or report.get("symbol") != config["symbol"] or
                     report.get("loader_observed") is not True):

@@ -12,6 +12,7 @@ FACK：面向 gfx942 的 AMDGPU 汇编指令调度调优框架。
 | skill | 什么时候读 |
 |---|---|
 | [`mfma-interleave-gfx942`](knowledge/skills/mfma-interleave-gfx942/SKILL.md) | gfx942 MFMA 穿插、实测窗口查询与汇编覆盖检查；直接引用 submodule 已有导出，模型只提供估计 |
+| [`aiter-gfx942-validation`](knowledge/skills/aiter-gfx942-validation/SKILL.md) | aiter 远端/Docker 环境准备、GPU 选择、seed 验证，以及调优后的单算子 op_test 对比 |
 
 ## 自学成果依赖
 
@@ -49,4 +50,4 @@ SDK 与 Web UI 接受 `.s` 汇编作为 seed。
 - `client/aiter/upstream` 是 ROCm/aiter 的固定版本 submodule；初始化使用 `bash tools/init_aiter.sh`，不自动追踪 main。
 - 适配层、manifest 和 driver 维护在 submodule 外；候选编译到 `client/aiter/tune_out/`，不覆盖上游 HSA 文件。
 - 使用架构对应的 `aiter/hsa/<gfx>` SPEC；先在目标真机验证 seed，再调优。使用说明见 [client/aiter/README.md](client/aiter/README.md)。
-- 本次接入只做静态检查；用户明确要求执行前，不运行项目、测试、构建、GPU 或模型调优。
+- 新环境按 [操作步骤](client/aiter/docs/validation.md) 执行；已验证环境与案例随仓库保存。用户要求运行或验证任务后按授权范围执行；仅整理资料时不启动 GPU 实验。

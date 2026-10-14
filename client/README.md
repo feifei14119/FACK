@@ -125,4 +125,4 @@ screen/confirm/final 的性能样本。一次 evaluate 可能包含多次 launch
 ## aiter HSA 接入
 
 已实现 submodule、独立候选编译、完整数值比较和 GPU graph 计时。初始化、seed 准备、架构入口与扩展协议见 [aiter/README.md](aiter/README.md)。
-本次只做静态检查；在目标真机校验 seed 后再开始调优。
+已有单算子真机验证记录；新环境仍需先验证 seed，见 [aiter 操作步骤](aiter/docs/validation.md)。

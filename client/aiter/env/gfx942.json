@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "arch": "gfx942",
+  "aiter_commit": "2abf8aaa44f9d81c88d6153024b21e6931c7f906",
+  "image": "rocm/atom-dev@sha256:c7a29446b588a1c85aead74be2c9c7e40a84d6d8817215df4da6ac3f50131bf5",
+  "python": "/opt/venv/bin/python3",
+  "triton_min": "3.6.0",
+  "required_modules": ["torch", "triton", "pandas", "numpy", "ninja", "pybind11", "einops", "psutil", "packaging", "yaml"],
+  "validated_versions": {
+    "python": "3.12.3",
+    "torch": "2.10.0+rocm7.2.4.git3d3aa833",
+    "triton": "3.7.0",
+    "hip": "7.2.53211"
+  },
+  "evidence": "client/aiter/docs/validated-runs/20261014.md"
+}

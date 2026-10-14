@@ -14,7 +14,9 @@
 
 ## 在目标机器准备
 
-本次接入只做静态检查，尚未运行这些命令、构建或验证 GPU 结果。以下命令均在仓库根执行。
+已完成一个 gfx942 小尺寸算子的真机验证，范围见 [实测记录](docs/validated-runs/20261014.md)。
+新机器的 Docker、依赖检查、单 shape op_test 与配对比较见 [操作步骤](docs/validation.md)。
+以下命令均在仓库根执行。
 
 ```bash
 bash tools/init_aiter.sh
@@ -80,7 +82,7 @@ JIT 缓存在 `tune_out/jit/`，按架构、已声明上游资源和工具摘要
   这是主机加载路径证据，`build_evidence.loaded_code_object` 仍为 `unverified`，不宣称完成 GPU dispatch 证明。
 - 两组固定种子的有符号随机输入，使用未 shuffle 数据构造独立 FP32 参考再转 BF16，比较完整输出。
   比较前将输出填为 NaN，未写出、非有限值、shape 错误或超出 manifest 容差均不能通过。
-  当前容差是显式的起始配置，尚待真机验证，不会自动放宽。
+  当前容差在记录中的小尺寸上通过真机验证；其他 workload 仍需独立验证，不会自动放宽。
 - 数值通过后预热并捕获 HIP graph，以 event 测量重复调用，取多组中位数除以调用次数。
   输入生成、参考计算、shuffle、JIT 和正确性检查不计时；返回的是 driver `run()` 的 GPU graph 时间。
   计时后清空输出再 replay，重复完整校验。TFLOPS = driver FLOP 数 / 时间。
@@ -115,3 +117,9 @@ def prepare(inputs, symbol, seed):
 driver 必须支持重复调用和 HIP graph capture；涉及额外 kernel、临时缓冲、split reduction 的算子，
 应在 driver 中完整实现并说明计时范围。参考不得调用被替换的候选路径。
 更新上游 gitlink 后重新核对 driver API、CSV 和 symbol；不能假定 main 的未来版本兼容。
+
+manifest 可显式设置 `"validation_hook": true`，要求 driver 额外实现
+`validate(inputs, symbol, seed) -> {"correct": true, ...}`。runner 在两组基本数值校验后、
+graph 预热/计时前调用一次，结果写入 `result.json` 的 `op_test`；异常、缺失 hook 或非通过结果都会使评估失败。
+默认 manifest 不启用该阶段。`hsa/gfx942/optest_manifest.json` 通过此阶段执行固定上游的单 shape `test_gemm`，
+可用于任何合法 seed 值。具体命令、版本检查与输出解释见 [操作步骤](docs/validation.md)。
