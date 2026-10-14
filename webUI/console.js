@@ -6,6 +6,7 @@
   const api = {
     async get(path) {
       const r = await fetch(path, { cache: "no-store" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
     },
     async post(path, body) {
@@ -60,6 +61,7 @@
       $$(".tabpane").forEach((x) => x.classList.remove("active"));
       t.classList.add("active");
       $("#pane-" + t.dataset.tab).classList.add("active");
+      $(".layout").classList.toggle("results-active", t.dataset.tab === "results");
       if (t.dataset.tab === "results") { loadResults(); loadSkills(); }
     });
   });
@@ -229,43 +231,46 @@
   });
 
   // ---------------- results ----------------
+  let resultRows = [];
+  function renderResults() {
+    const filters = { client: $("#resultClient").value, gfx: $("#resultGfx").value, query: $("#resultQuery").value };
+    const visible = resultRows.filter((r) => window.FACKResults.matches(r, filters));
+    $("#resultsCount").textContent = "显示 " + visible.length + " / " + resultRows.length + " 条记录";
+    $("#resultsBox").innerHTML = visible.length
+      ? visible.map((r) => '<article class="result-item">' + window.FACKResults.card(r) + '</article>').join("")
+      : '<p class="empty-hint">' + (resultRows.length ? "没有符合筛选条件的记录。" : "暂无调优记录。完成调优或配对比较后，点击刷新查看。") + '</p>';
+  }
+
+  function fillResultFilter(selector, key, label) {
+    const select = $(selector), current = select.value;
+    const options = [...new Set(resultRows.map((r) => (r.target || {})[key]).filter(Boolean))].sort();
+    select.replaceChildren(new Option(label, ""), ...options.map((v) => new Option(v, v)));
+    if (options.includes(current)) select.value = current;
+  }
+
   async function loadResults() {
     const box = $("#resultsBox");
-    box.innerHTML = "加载中…";
-    let data;
-    try { data = await api.get("/api/results"); } catch (e) { box.innerHTML = '<span class="empty-hint">无法读取</span>'; return; }
-    const rs = data.results || [];
-    if (!rs.length) { box.innerHTML = '<span class="empty-hint">暂无结果（跑一次调优后这里会出现最好/最坏 kernel 汇总）。</span>'; return; }
-    box.innerHTML = "";
-    rs.forEach((r) => box.appendChild(resultCard(r)));
+    $("#refreshResults").disabled = true;
+    box.textContent = "加载中…";
+    $("#resultsErrors").textContent = "";
+    try {
+      const data = await api.get("/api/results");
+      if (!Array.isArray(data.results)) throw new Error("结果接口格式错误");
+      resultRows = data.results;
+      fillResultFilter("#resultClient", "client", "全部 client");
+      fillResultFilter("#resultGfx", "gfx", "全部架构");
+      $("#resultsErrors").textContent = (data.errors || []).map((e) => "暂无法读取 " + e.source + "：" + e.error).join("\n");
+      renderResults();
+    } catch (e) {
+      box.textContent = "无法读取结果：" + e.message + "。请点击刷新重试。";
+      $("#resultsCount").textContent = "";
+    } finally {
+      $("#refreshResults").disabled = false;
+    }
   }
 
-  function resultCard(r) {
-    const el = document.createElement("div");
-    el.className = "result-item";
-    const best = r.best || {};
-    const worst = r.worst || {};
-    const impPct = best.improvement != null ? (best.improvement * 100) : null;
-    let html = '<div class="r-file">' + esc(r._file || "") + "</div>";
-    html += '<div class="result-grid">';
-    html += metric("筛选最高 TFLOPS", best.tflops, "good");
-    html += metric("baseline", best.baseline_tflops != null ? best.baseline_tflops : worst.baseline_tflops, "");
-    html += metric("最差 TFLOPS", worst.tflops, "");
-    if (impPct != null) html += metric("筛选提升 %", impPct, impPct >= 0 ? "good" : "bad");
-    if (r.evals_total != null) html += metric("评测 (正确/总)", (r.evals_correct != null ? r.evals_correct : "?") + " / " + r.evals_total, "");
-    if (best.region) html += metric("区域", best.region, "");
-    html += "</div>";
-    html += '<div class="r-file">筛选结果，尚未独立复测确认。</div>';
-    if (r.best_shader) html += '<div class="r-file" style="margin-top:8px">待复测 .s: ' + esc(r.best_shader) + "</div>";
-    el.innerHTML = html;
-    return el;
-  }
-
-  function metric(k, v, cls) {
-    if (v == null) return "";
-    let val = typeof v === "number" ? (Math.round(v * 1000) / 1000) : v;
-    return '<div class="metric"><div class="k">' + esc(k) + '</div><div class="v ' + cls + '">' + esc(val) + "</div></div>";
-  }
+  ["#resultClient", "#resultGfx"].forEach((sel) => $(sel).addEventListener("change", renderResults));
+  $("#resultQuery").addEventListener("input", renderResults);
 
   async function loadSkills() {
     const box = $("#skillsBox");

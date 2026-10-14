@@ -389,5 +389,11 @@
     "fack-aiter-portability-20261014-v2": "exited"
   },
   "raw_comparison": "/data/feifei/FACK/client/aiter/tune_out/portability-20261014/checkout with spaces/client/aiter/tune_out/comparisons/paired-40jodnsw/comparison.json",
-  "raw_evidence_sha256": "93913a2c2643a12e5e5781c29ed543e73500291003188002efaf715e2d7015eb"
+  "raw_evidence_sha256": "93913a2c2643a12e5e5781c29ed543e73500291003188002efaf715e2d7015eb",
+  "target": {
+    "client": "aiter/hsa/gfx942",
+    "gfx": "gfx942",
+    "co": "fp8gemm_blockscale/fp8gemm_bf16_blockscale_BpreShuffle_32x128.co",
+    "symbol": "_ZN5aiter42fp8gemm_bf16_blockscale_BpreShuffle_32x128E"
+  }
 }

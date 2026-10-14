@@ -34,6 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)                 # webUI 的上一级 = 仓库根
 sys.path.insert(0, REPO)
 import client as _clients  # noqa: E402
+from webUI.results import read_results as _read_results  # noqa: E402
 RUNS_DIR = os.path.join(HERE, ".runs")       # 作业日志落这里
 os.makedirs(RUNS_DIR, exist_ok=True)
 
@@ -245,29 +246,7 @@ def job_public(job):
 
 # ------------------------------------------------------------------ results
 def read_results():
-    """Every client's <client>/tune_out/tune_result/*.summary.json."""
-    out = []
-    for name_ in _clients.list_clients():
-        d = os.path.join(_clients.CLIENT_ROOT, name_, _clients.OUT_DIRNAME, "tune_result")
-        if os.path.isdir(d):
-            out += _read_result_dir(d, name_)
-    return out
-
-
-def _read_result_dir(d, client_name):
-    out = []
-    for name in sorted(os.listdir(d)):
-        if not name.endswith(".summary.json"):
-            continue
-        try:
-            with open(os.path.join(d, name), encoding="utf-8") as f:
-                data = json.load(f)
-            data["_file"] = name
-            data["_client"] = client_name
-            out.append(data)
-        except (OSError, ValueError):
-            continue
-    return out
+    return _read_results(REPO, _clients.list_clients())
 
 
 def list_skills():
@@ -352,7 +331,7 @@ class Handler(BaseHTTPRequestHandler):
             pub["log"] = chunk
             return self._json(pub)
         if path == "/api/results":
-            return self._json({"results": read_results()})
+            return self._json(read_results())
         if path == "/api/skills":
             return self._json({"skills": list_skills()})
         if path == "/api/defaults":

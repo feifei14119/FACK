@@ -169,5 +169,11 @@
     0
   ],
   "cpu_tests": 649,
-  "cpu_subtests": 19
+  "cpu_subtests": 19,
+  "target": {
+    "client": "aiter/hsa/gfx942",
+    "gfx": "gfx942",
+    "co": "fp8gemm_blockscale/fp8gemm_bf16_blockscale_BpreShuffle_32x128.co",
+    "symbol": "_ZN5aiter42fp8gemm_bf16_blockscale_BpreShuffle_32x128E"
+  }
 }

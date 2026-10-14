@@ -113,31 +113,15 @@ def render_markdown(report):
     return "\n".join(lines)
 
 
-def export_report(run_directory, out=None, json_path=None):
+def snapshot_report(run_directory):
+    """Read the current authoritative snapshot without exporting or measuring."""
     run = RunController(run_directory)
-    snapshot = run.status()  # controller lock, frozen manifest/schema validation
+    return _snapshot_report(run, run.status())
+
+
+def _snapshot_report(run, snapshot, output=None):
     directory = run.directory
     manifest, state = snapshot["manifest"], snapshot["state"]
-    output = (Path(out) if out else directory / "report").resolve()
-    destination = (Path(json_path) if json_path else output / "report.json").resolve()
-    if destination.suffix not in (".json", ".jsonl"):
-        raise ValueError("report JSON path must end in .json or .jsonl")
-    for target in (output, destination):
-        for ancestor in (target,) + tuple(target.parents):
-            if (ancestor != directory and (ancestor / "manifest.json").is_file() and
-                    (ancestor / "state.json").is_file()):
-                raise ValueError("derived reports cannot write into another run")
-        if (target == directory or directory in target.parents) and not (
-                target == directory / "report" or directory / "report" in target.parents):
-            raise ValueError("inside a run, derived reports must stay under RUN/report")
-    markdown = destination.with_suffix(".md")
-    output.mkdir(parents=True, exist_ok=True)
-    # The dedicated export names always refer to this snapshot. Clear stale
-    # derived copies before inspecting integrity; never leave a stale winner.
-    for role in ("screening_best", "confirmed_best", "selected"):
-        target = output / (role + ".s")
-        if target.exists() or target.is_symlink():
-            target.unlink()
     errors, candidates, verified = [], [], {}
     for candidate_id, candidate in state["candidates"].items():
         artifact = candidate["artifact"]
@@ -162,6 +146,8 @@ def export_report(run_directory, out=None, json_path=None):
         if candidate_id not in verified:
             return None
         item = dict(by_id[candidate_id])
+        if output is None:
+            return dict(item, export_path=None)
         destination = output / (role + ".s")
         _write(destination, verified[candidate_id])
         if hashlib.sha256(destination.read_bytes()).hexdigest() != item["sha256"]:
@@ -247,6 +233,36 @@ def export_report(run_directory, out=None, json_path=None):
               "failures": failures, "input_provenance": provenance, "integrity_errors": errors,
               "scope": "Snapshot of controller decisions on client-reported evidence; no new evaluation. "
                        "Reports do not provide shell isolation, semantic-equivalence proof, or hardware validation."}
+    return report
+
+
+def export_report(run_directory, out=None, json_path=None):
+    run = RunController(run_directory)
+    snapshot = run.status()  # controller lock, frozen manifest/schema validation
+    directory = run.directory
+    output = (Path(out) if out else directory / "report").resolve()
+    destination = (Path(json_path) if json_path else output / "report.json").resolve()
+    if destination.suffix not in (".json", ".jsonl"):
+        raise ValueError("report JSON path must end in .json or .jsonl")
+    for target in (output, destination):
+        for ancestor in (target,) + tuple(target.parents):
+            if (ancestor != directory and (ancestor / "manifest.json").is_file() and
+                    (ancestor / "state.json").is_file()):
+                raise ValueError("derived reports cannot write into another run")
+        if (target == directory or directory in target.parents) and not (
+                target == directory / "report" or directory / "report" in target.parents):
+            raise ValueError("inside a run, derived reports must stay under RUN/report")
+    markdown = destination.with_suffix(".md")
+    output.mkdir(parents=True, exist_ok=True)
+    # The dedicated export names always refer to this snapshot. Clear stale
+    # derived copies before inspecting integrity; never leave a stale winner.
+    for role in ("screening_best", "confirmed_best", "selected"):
+        target = output / (role + ".s")
+        if target.exists() or target.is_symlink():
+            target.unlink()
+    report = _snapshot_report(run, snapshot, output)
+    errors = report["integrity_errors"]
+    selected = report["selected"]
     _write(destination, (json.dumps(report, ensure_ascii=False, allow_nan=False, indent=2) + "\n").encode())
     _write(markdown, render_markdown(report).encode())
     return {"json_path": str(destination), "markdown_path": str(markdown),

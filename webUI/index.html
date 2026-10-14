@@ -159,8 +159,15 @@
             <h3>调优结果汇总</h3>
             <button class="btn tiny" id="refreshResults">刷新</button>
           </div>
-          <p class="desc">读取各 client 的 <code>client/&lt;name&gt;/tune_out/tune_result/*.summary.json</code>。</p>
-          <div id="resultsBox" class="results-box">尚未加载。</div>
+          <p class="desc">按 client、GPU 架构和 .co 查看调优对象、最终选择及性能对比。归档实测会单独标记。</p>
+          <div class="form results-filters">
+            <label>Client<select id="resultClient"><option value="">全部 client</option></select></label>
+            <label>GFX<select id="resultGfx"><option value="">全部架构</option></select></label>
+            <label>查找 .co / symbol / 任务<input id="resultQuery" type="search" placeholder="输入 .co 名称或任务 ID" /></label>
+          </div>
+          <p id="resultsCount" class="desc" aria-live="polite"></p>
+          <div id="resultsErrors" role="status"></div>
+          <div id="resultsBox" class="results-box" aria-live="polite">尚未加载。</div>
         </div>
         <div class="card">
           <div class="card-head-row">
@@ -191,6 +198,7 @@
   </div>
 
   <div class="toast" id="toast">已复制</div>
+  <script src="results.js"></script>
   <script src="console.js"></script>
 </body>
 </html>
