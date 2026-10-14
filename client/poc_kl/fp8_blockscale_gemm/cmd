@@ -1,4 +1,0 @@
-/opt/rocm/llvm/bin/clang++ -x assembler -target amdgcn--amdhsa --offload-arch=gfx942 ./shader/fp8gemm_blockscase_32mx1_32nx4.s -o gemm.co
-/opt/rocm/bin/hipcc --offload-arch=gfx942  fp8gemm.cpp -o gemm.exe
-./gemm.exe
-rocprofv2 -i input.txt --plugin att auto -d ./att ./gemm.exe

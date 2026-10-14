@@ -1,8 +1,0 @@
-att: TARGET_CU=F
-SE_MASK=0x0F
-SIMD_SELECT=0xF
-ISA_CAPTURE_MODE=2
-BUFFER_SIZE=100
-# KERNEL= is injected per-run by harness.evaluator (auto-detected from the
-# candidate .s); do NOT hardcode a kernel here -- the engine is kernel-agnostic.
-# A manual `rocprofv2 -i input.txt` without it captures the first dispatch.
