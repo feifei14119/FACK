@@ -9,6 +9,7 @@ import csv
 from datetime import datetime, timezone
 import fcntl
 import io
+import html
 import json
 import math
 import os
@@ -21,14 +22,16 @@ from urllib.parse import quote
 if __package__:
     from .aiter_campaign_exports import sync_exports
     from .aiter_campaign_diagnostics import sync_diagnostic
+    from . import campaign_workloads as workloads
 else:
     from aiter_campaign_exports import sync_exports
     from aiter_campaign_diagnostics import sync_diagnostic
+    import campaign_workloads as workloads
 
-FILES = ('inventory.json', 'progress.json', 'remaining.json')
+FILES = ('inventory.json', 'plan.json', 'progress.json', 'remaining.json')
 OPTIONAL_FILES = ('watchdog.json', 'watchdog-stop.json')
 FINISHED = {'completed', 'done', 'optimized', 'confirmed_gain',
-            'final_recommended', 'original_retained', 'retained_original'}
+            'final_recommended', 'original_retained', 'retained_original', 'winner_confirmed'}
 LIMIT = 32 * 1024 * 1024
 STAGE_LABELS = {
     'not_started': '未开始',
@@ -67,7 +70,7 @@ def read_json(path, default=None):
 
 def entries(value):
     if isinstance(value, dict):
-        for name in ('kernels', 'code_objects', 'objects', 'items', 'remaining'):
+        for name in ('kernels', 'tasks', 'code_objects', 'objects', 'items', 'remaining'):
             if name in value:
                 return entries(value[name])
         return []
@@ -92,7 +95,7 @@ def in_scope(row):
 
 def progress_breakdown(snapshot):
     """Classify final work coverage without changing authoritative remote status."""
-    unfinished = {row['co'] for row in snapshot['remaining']}
+    unfinished = {workloads.key(row) for row in snapshot['remaining']}
     groups = {name: [] for name in STAGE_LABELS}
     for row in snapshot['kernels']:
         if not in_scope(row):
@@ -104,7 +107,7 @@ def progress_breakdown(snapshot):
         if not isinstance(metrics, dict):
             metrics = {}
         decision = metrics.get('campaign_decision') or (metrics.get('final') or {}).get('status')
-        if row['co'] not in unfinished:
+        if workloads.key(row) not in unfinished:
             if decision in ('original_retained', 'retained_original'):
                 group = 'completed_original_retained'
             elif metrics.get('valid_for_adoption') is True:
@@ -116,6 +119,8 @@ def progress_breakdown(snapshot):
         elif (status in ('not_started', 'unstarted') or stage in ('not_started', 'unstarted') or
               reason == 'not_started' or reason.startswith(('not_started:', 'not_started_before_'))):
             group = 'not_started'
+        elif status in ('pending', 'pending_original_validation', 'queued', 'discovered') and not metrics:
+            group = 'not_started'
         elif status in ('blocked', 'failed', 'error', 'seed_failed', 'adapter_failed') and (
                 stage in ('seed', 'prepare', 'adapter', 'environment', 'initializing') or
                 any(marker in reason for marker in ('prepare:', 'original validation failed', 'seed validation failed',
@@ -124,7 +129,7 @@ def progress_breakdown(snapshot):
             group = 'seed_or_adapter_failed'
         elif row.get('run_id') or metrics or stage in ('candidate', 'screening', 'confirm', 'final'):
             group = 'candidate_or_retest_incomplete'
-        elif not row.get('run_id') and status in ('pending', 'queued', 'discovered', ''):
+        elif not row.get('run_id') and status in ('pending', 'pending_original_validation', 'queued', 'discovered', ''):
             group = 'not_started'
         else:
             group = 'unresolved_stage'
@@ -137,7 +142,7 @@ def fetch_remote(control):
     script = '''import json, pathlib, subprocess, sys
 root = pathlib.Path(sys.argv[1])
 data, errors = {}, {}
-for name in ("inventory.json", "progress.json", "remaining.json", "watchdog.json", "watchdog-stop.json"):
+for name in json.loads(sys.argv[3]) + ["watchdog.json", "watchdog-stop.json"]:
     try:
         path = root / name
         if path.is_symlink():
@@ -161,8 +166,11 @@ if len(sys.argv) > 2 and sys.argv[2]:
 print(json.dumps(result, allow_nan=False))
 '''
     container = control.get('container', '') if control.get('_verify_stop') else ''
-    remote_cmd = 'python3 -c %s %s %s' % (shlex.quote(script),
-                                        shlex.quote(control['remote_output']), shlex.quote(container))
+    state_files = control.get('state_files', ['inventory.json', 'progress.json', 'remaining.json'])
+    if not isinstance(state_files, list) or any(name not in FILES for name in state_files):
+        raise ValueError('invalid fixed state file list')
+    remote_cmd = 'python3 -c %s %s %s %s' % (shlex.quote(script),
+        shlex.quote(control['remote_output']), shlex.quote(container), shlex.quote(json.dumps(state_files)))
     result = subprocess.run(
         ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=12',
          '-o', 'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=2',
@@ -186,14 +194,25 @@ def build_snapshot(control, documents, sync, previous=None, final=False):
     progress = documents.get('progress.json') or {}
     if not isinstance(progress, dict):
         progress = {'kernels': progress}
-    merged = {}
+    plan = documents.get('plan.json') or {}
+    planned = {workloads.key(row): row for row in workloads.plan_tasks(plan)}
+    merged = {key: dict(row) for key, row in planned.items()}
     for name in ('inventory.json', 'remaining.json', 'progress.json'):
         for row in entries(documents.get(name)):
-            co = row['co']
+            identity = workloads.key(row)
             # Remaining lists often contain only identity and reason; do not
             # discard actual measurements already published in progress.
-            merged.setdefault(co, {'co': co, 'status': 'pending'}).update(row)
-    kernels = sorted(merged.values(), key=lambda row: (str(row.get('category', '')), row['co']))
+            merged.setdefault(identity, {'co': row['co'], 'status': 'pending'}).update(row)
+    kernels = sorted(merged.values(), key=lambda row: (str(row.get('category', '')), row['co'], workloads.key(row)))
+    for row in kernels:
+        if row.get('task_id') or row.get('workload_id'):
+            normalized = workloads.workload(row)
+            prior = planned.get(workloads.key(row))
+            if prior and not normalized.get('csv'):
+                normalized['csv'] = prior['workload']['csv']
+            row['workload'] = normalized
+    current_id = progress.get('current_task_id') or progress.get('current')
+    current_row = next((row for row in kernels if workloads.key(row) == current_id), {})
     targets = [row for row in kernels if in_scope(row)]
     remaining = [row for row in targets if row.get('status') not in FINISHED or not row.get('metrics')
                  or (isinstance(row.get('metrics'), dict) and row['metrics'].get('valid_for_adoption') is False)]
@@ -201,9 +220,11 @@ def build_snapshot(control, documents, sync, previous=None, final=False):
     for row in kernels:
         state = str(row.get('status', 'pending'))
         counts[state] = counts.get(state, 0) + 1
-    return {
+    snapshot = {
         'schema_version': 1, 'campaign_id': control['campaign_id'],
-        'started_at': control['started_at'], 'deadline': control['deadline'],
+        'started_at': control['started_at'], 'deadline': control.get('deadline'),
+        'stop_condition': control.get('stop_condition', 'deadline'),
+        'row_identity': 'workload' if plan or any(r.get('task_id') for r in kernels) else 'co',
         'phase_deadlines': control.get('phase_deadlines', {}),
         'generated_at': sync['attempted_at'], 'remote_updated_at': progress.get('updated_at'),
         'remote': control['remote'], 'remote_output': control['remote_output'],
@@ -212,8 +233,9 @@ def build_snapshot(control, documents, sync, previous=None, final=False):
         'local_output': control['local_output'], 'sync': sync,
         'monitor_status': 'finished' if final else 'running',
         'status': progress.get('status', 'awaiting_remote_state'),
-        'phase': progress.get('phase'), 'current_co': progress.get('current_co'),
+        'phase': progress.get('phase'), 'current_co': progress.get('current_co') or current_row.get('co'),
         'active_step': progress.get('active_step'),
+        'current_task_id': current_id, 'winner': progress.get('winner'),
         'diagnostic': progress.get('diagnostic'),
         'diagnostic_history': progress.get('diagnostic_history', []),
         'category_counts': progress.get('category_counts', {}),
@@ -227,6 +249,9 @@ def build_snapshot(control, documents, sync, previous=None, final=False):
         'notes': progress.get('notes', []),
         'gpu_stop': {'status': 'stop_unverified' if final else 'not_checked'},
     }
+    if plan:
+        snapshot.update(workloads.coverage(plan, kernels, remaining))
+    return snapshot
 
 
 def sync_once(control, final=False, fetcher=fetch_remote):
@@ -275,8 +300,50 @@ def cell(value):
     return value.replace('|', '\\|').replace('\n', '<br>')
 
 
+def metric_summary(metrics):
+    if not isinstance(metrics, dict) or not metrics:
+        return '尚无本次实测'
+    if metrics.get('valid_for_adoption') is False:
+        return '候选验证失败，不可采用；历史配对值不计有效收益。完整证据见同名 JSON 报告。'
+    original = metrics.get('original_screen') or {}
+    measurement = original.get('measurement') or original
+    values = []
+    samples = measurement.get('samples') or []
+    good = [s['result'] for s in samples if isinstance(s.get('result'), dict) and s['result'].get('correct') is True]
+    graph = [s['time_us'] for s in good if isinstance(s.get('time_us'), (float, int))]
+    if graph:
+        values.append('原始 screen %d/%d 正确；HIP graph %.5f–%.5f us' % (len(good), len(samples), min(graph), max(graph)))
+    elif measurement.get('time_us') is not None:
+        values.append('原始 screen %s us；正确性 %s' % (measurement['time_us'], measurement.get('correct')))
+    op_rows = [r for s in good for r in ((s.get('detail') or {}).get('runner') or {}).get('op_test', {}).get('rows', [])]
+    distributions = {(r.get('data_init'), r.get('scale_init')) for r in op_rows}
+    op_label = 'op_test（多分布 aggregate screen）' if len(distributions) > 1 else 'op_test'
+    op = [r['asm us'] for r in op_rows if isinstance(r.get('asm us'), (float, int))]
+    if op:
+        values.append('%s %.5f–%.5f us' % (op_label, min(op), max(op)))
+    candidates = [row for row in metrics.get('candidate_screens', []) if isinstance(row, dict)
+                  and row.get('correct') is True and isinstance(row.get('hip_graph'), dict)
+                  and type(row['hip_graph'].get('median_us')) in (int, float)
+                  and math.isfinite(row['hip_graph']['median_us']) and row['hip_graph']['median_us'] > 0]
+    if candidates:
+        best = min(candidates, key=lambda row: row['hip_graph']['median_us'])
+        values.append('候选 screening（未独立确认）：HIP graph 中位数最低的正确候选 %s，'
+                      'HIP graph %.5f us，%s %s us，有效样本 %s；筛选值不代表已确认收益' % (
+                          best.get('candidate_id'), best['hip_graph']['median_us'],
+                          op_label, (best.get('op_test') or {}).get('median_us', '未记录'), best.get('valid_samples')))
+    for pair in metrics.get('paired_results', []):
+        if pair.get('stage') == 'final' and (pair.get('scope') == 'independent_paired' or pair.get('independent') is True):
+            values.append('final %s：gain=%s%%，%s 对，%s（reference=%s）' % (
+                pair.get('method'), pair.get('gain_pct'), pair.get('pairs'), pair.get('verdict'), pair.get('reference_id')))
+    decision = metrics.get('campaign_decision') or (metrics.get('final') or {}).get('status')
+    if decision:
+        values.append('当前 workload 决定：' + str(decision))
+    return '；'.join(values) or '已记录本次证据；完整字段见同名 JSON 报告。'
+
+
 def outcome_summary(snapshot):
     """Summarize final evidence without deriving gains from screening medians."""
+    workload_scope = snapshot.get('row_identity') == 'workload'
     adopted, retained = [], []
     for row in snapshot['kernels']:
         metrics = row.get('metrics') or {}
@@ -285,7 +352,7 @@ def outcome_summary(snapshot):
         final = metrics.get('final') or {}
         decision = metrics.get('campaign_decision') or final.get('status')
         if metrics.get('valid_for_adoption') is True and decision in (
-                'final_recommended', 'confirmed_gain', 'candidate_adopted', 'candidate_selected', 'adopted'):
+                'final_recommended', 'confirmed_gain', 'candidate_adopted', 'candidate_selected', 'adopted', 'winner_confirmed'):
             adopted.append(row)
         elif decision in ('original_retained', 'retained_original') and metrics.get('valid_for_adoption') is not False:
             retained.append(row)
@@ -297,7 +364,8 @@ def outcome_summary(snapshot):
                  states.get('pending', 0), states.get('tuning', 0)), '',
              '下表仅列已通过采用门槛的对象；百分比来自 final 阶段、明确以 original 为参考的独立配对比值统计，'
              '不是两列中位数的直接比值。', '',
-             '| 已采用 .co | 最终原始基线配对结果 | 已取回的本机产物 |', '|---|---|---|']
+             ('| 已确认胜出的 workload / .co | 最终原始基线配对结果 | 已取回的本机产物 |' if workload_scope else
+              '| 已采用 .co | 最终原始基线配对结果 | 已取回的本机产物 |'), '|---|---|---|']
     local = snapshot.get('local_exports') or {}
     files = local.get('files', []) if local.get('status') == 'verified' else []
     for row in adopted:
@@ -316,6 +384,8 @@ def outcome_summary(snapshot):
         for artifact in files:
             if artifact.get('co') != row['co'] or artifact.get('verified') is not True:
                 continue
+            if row.get('task_id') and artifact.get('task_id') != row['task_id']:
+                continue
             relative = Path(artifact.get('path', ''))
             if relative.is_absolute() or '..' in relative.parts:
                 continue
@@ -323,7 +393,8 @@ def outcome_summary(snapshot):
             if full.is_file() and full.stat().st_size == artifact.get('size_bytes'):
                 links.append('[%s](%s)' % (cell(relative.name), quote('exports/' + relative.as_posix())))
         lines.append('| %s | %s | %s |' % (
-            cell(row['co']), '<br>'.join(cell(value) for value in values) or '未记录符合条件的 final 原始基线配对摘要',
+            cell((str(row.get('task_id') or row.get('workload_id')) + ' / ' if workload_scope else '') + row['co']),
+            '<br>'.join(cell(value) for value in values) or '未记录符合条件的 final 原始基线配对摘要',
             ' · '.join(links) or '尚未取回；远端路径见下方明细'))
     if not adopted:
         lines += ['', '当前尚无通过全部采用门槛并正式采用的候选。']
@@ -336,7 +407,7 @@ def markdown_report(snapshot, final=False):
              '- 报告时间：' + snapshot.get('report_written_at', snapshot['generated_at']),
              '- 报告槽时间：' + str(snapshot.get('scheduled_report_at', '即时报告')),
              '- 快照同步开始：' + snapshot['generated_at'],
-             '- 截止时间：' + snapshot['deadline'],
+             '- 截止时间：' + str(snapshot.get('deadline') or '首个严格确认胜出后停止'),
              '- 远端状态更新时间：' + str(snapshot['remote_updated_at']),
              '- 最近成功通信：' + str(snapshot['sync']['last_success_at']),
              '- 当前通信：' + ('已连接' if snapshot['sync']['connected'] else '失败；以下为最后同步记录'),
@@ -344,10 +415,29 @@ def markdown_report(snapshot, final=False):
              '- 阶段 / 状态：%s / %s' % (snapshot['phase'], snapshot['status']),
              '- 当前步骤：' + str(snapshot.get('active_step')),
              '- 当前 .co：' + str(snapshot['current_co']),
+             '- 当前 workload/task：' + str(snapshot.get('current_task_id')),
              '- 已知 %d；本次范围 %d；范围外 %d；完成 %d；待完成 %d' % (
                  count['known'], count['target_count'], count['out_of_scope'], count['finished'], count['remaining']),
              '- 远端产物目录：' + snapshot['remote_output'],
              '- 本机目录：' + snapshot['local_output'], '']
+    if snapshot.get('row_identity') == 'workload':
+        lines += ['计数单位为独立 workload；同一 .co 的不同尺寸不会合并。', '',
+                  'CSV 覆盖：`%s`。全部未调优 workload 与 .co 原因分别保存为 '
+                  '[remaining-workloads.csv](remaining-workloads.csv) 和 [co-coverage.csv](co-coverage.csv)。' %
+                  cell(snapshot.get('coverage_counts')), '']
+    if snapshot.get('winner'):
+        winner = snapshot['winner']
+        assessed = winner.get('coverage_assessment') or winner.get('assess_summary') or winner.get('assess') or {}
+        summary = {k: winner.get(k) for k in ('task_id', 'co', 'scope')}
+        if isinstance(assessed, dict):
+            assessed_counts = assessed.get('counts') or {}
+            summary['coverage'] = {'status': assessed.get('status'),
+                'unsupported': assessed_counts.get('unsupported', assessed.get('unsupported')),
+                'nonregression_pass': assessed_counts.get('pass', assessed.get('nonregression'))}
+        else:
+            summary['coverage'] = '详见 JSON 证据'
+        lines += ['胜出仅限已验证 workload，不代表同 .co 的其他用途已通过覆盖验证。', '',
+                  '胜出与覆盖摘要：`%s`。完整记录和产物路径见同名 JSON 报告。' % cell(summary), '']
     if snapshot['sync']['errors']:
         lines += ['通信 / 文件错误：`%s`' % cell(snapshot['sync']['errors']), '']
     if isinstance(snapshot.get('diagnostic'), dict) and snapshot['diagnostic']:
@@ -376,27 +466,27 @@ def markdown_report(snapshot, final=False):
         groups = progress_breakdown(snapshot)
         lines += ['## 最终工作覆盖分类', '',
                   '以下分类依据现有 run、结果阶段和原因字段，不改远端原始 status；blocked 不等同于未尝试。', '',
-                  '| 分类 | .co 数量 |', '|---|---|']
+                  ('| 分类 | workload 数量 |' if snapshot.get('row_identity') == 'workload' else '| 分类 | .co 数量 |'), '|---|---|']
         lines += ['| %s | %d |' % (STAGE_LABELS[name], len(rows)) for name, rows in groups.items()]
         lines += ['', '全部未完成条目仍在 [remaining.csv](remaining.csv)；分类明细见 '
                   '[remaining-by-stage.csv](remaining-by-stage.csv)。已经调优且保留原始的对象单列于 '
                   '[completed-original-retained.csv](completed-original-retained.csv)。', '']
-    lines += ['## 全部已知 .co', '',
-              '| .co | 类别 | 状态 | 原因 | 实测性能（远端原值） | run / 产物 |',
-              '|---|---|---|---|---|---|']
+    lines += ['## 全部运行条目', '',
+              '| .co | workload / MNK / CSV来源 | 类别 | 状态 | 原因 | 实测性能（远端原值） | run / 产物 |',
+              '|---|---|---|---|---|---|---|']
     for row in snapshot['kernels']:
-        metrics = row.get('metrics')
-        metric_text = metrics
-        if isinstance(metrics, dict) and metrics.get('valid_for_adoption') is False:
-            metric_text = '**候选验证失败，不可采用；历史配对值不计有效收益。** ' + json.dumps(metrics, ensure_ascii=False, sort_keys=True)
+        metric_text = metric_summary(row.get('metrics'))
+        artifacts = '<details><summary>产物路径</summary><pre>%s</pre></details>' % html.escape(
+            json.dumps({'run_id': row.get('run_id'), 'artifacts': row.get('artifacts')}, ensure_ascii=False))
         lines.append('| %s |' % ' | '.join(cell(value) for value in (
-            row['co'], row.get('category'), row.get('status'), row.get('reason'),
-            metric_text, {'run_id': row.get('run_id'), 'artifacts': row.get('artifacts')})))
+            row['co'], row.get('workload'), row.get('category'), row.get('status'), row.get('reason'),
+            metric_text, artifacts)))
     if not snapshot['kernels']:
         lines += ['', '尚未收到远端 inventory；已知数量为 0，不代表远端没有 .co。']
-    lines += ['', '## 待完成 .co', '', '| .co | 类别 | 状态 | 原因 |', '|---|---|---|---|']
+    lines += ['', '## 待完成运行条目', '', '| .co | workload ID | 类别 | 状态 | 原因 |', '|---|---|---|---|---|']
     for row in snapshot['remaining']:
-        lines.append('| %s |' % ' | '.join(cell(row.get(key)) for key in ('co', 'category', 'status', 'reason')))
+        lines.append('| %s |' % ' | '.join(cell(value) for value in (
+            row['co'], workloads.key(row), row.get('category'), row.get('status'), row.get('reason'))))
     lines += ['', '性能仅展示本次任务发布的实测字段；空白表示尚无实测。筛选与最终确认以记录状态为准。', '']
     return '\n'.join(lines)
 
@@ -417,15 +507,31 @@ def write_report(control, snapshot, final=False):
                                  'report': snapshot['latest_report'], 'counts': snapshot['counts'],
                                  'phase': snapshot['phase'], 'status': snapshot['status'],
                                  'sync': snapshot['sync']}, ensure_ascii=False) + '\n')
+    workload_fields = ['task_id', 'workload_id', 'm', 'n', 'k', 'csv_file', 'csv_row'] if snapshot.get('row_identity') == 'workload' else []
+    for filename, rows, fields in (
+            ('remaining-workloads.csv', snapshot.get('remaining_workloads'),
+             ['workload_id', 'co', 'category', 'status', 'reason', 'm', 'n', 'k', 'csv_file', 'csv_row']),
+            ('co-coverage.csv', snapshot.get('co_coverage'),
+             ['co', 'status', 'reason', 'workload_ids', 'remaining_workload_ids'])):
+        if rows is not None:
+            output = io.StringIO()
+            writer = csv.DictWriter(output, fieldnames=fields)
+            writer.writeheader()
+            for row in rows:
+                values = workloads.csv_fields(row)
+                writer.writerow({key: json.dumps(values[key], ensure_ascii=False) if isinstance(values.get(key), list)
+                                 else values.get(key, '') for key in fields})
+            (root / filename).write_text(output.getvalue(), encoding='utf-8')
     if final:
         output = io.StringIO()
-        writer = csv.DictWriter(output, fieldnames=['co', 'category', 'status', 'reason'])
+        writer = csv.DictWriter(output, fieldnames=['co', 'category', 'status', 'reason'] + workload_fields)
         writer.writeheader()
         for row in snapshot['remaining']:
-            writer.writerow({key: row.get(key, '') for key in writer.fieldnames})
+            values = workloads.csv_fields(row)
+            writer.writerow({key: values.get(key, '') for key in writer.fieldnames})
         (root / 'remaining.csv').write_text(output.getvalue(), encoding='utf-8')
         groups = progress_breakdown(snapshot)
-        fields = ['stage', 'co', 'category', 'status', 'run_id', 'reason']
+        fields = ['stage', 'co', 'category', 'status', 'run_id', 'reason'] + workload_fields
         for filename, selected_groups in (
                 ('remaining-by-stage.csv', [name for name in groups if not name.startswith('completed_')]),
                 ('completed-original-retained.csv', ['completed_original_retained'])):
@@ -434,7 +540,8 @@ def write_report(control, snapshot, final=False):
             writer.writeheader()
             for name in selected_groups:
                 for row in groups[name]:
-                    writer.writerow(dict({key: row.get(key, '') for key in fields}, stage=name))
+                    values = workloads.csv_fields(row)
+                    writer.writerow(dict({key: values.get(key, '') for key in fields}, stage=name))
             (root / filename).write_text(output.getvalue(), encoding='utf-8')
         atomic_json(root / 'final-status-breakdown.json', {
             'campaign_id': control['campaign_id'], 'generated_at': snapshot['generated_at'],
@@ -443,6 +550,29 @@ def write_report(control, snapshot, final=False):
     atomic_json(root / 'snapshot.json', snapshot)
     print(json.dumps({'report': snapshot['latest_report'], 'counts': snapshot['counts'],
                       'phase': snapshot['phase'], 'sync_errors': snapshot['sync']['errors']}, ensure_ascii=False), flush=True)
+
+
+def success_requested(control, snapshot):
+    return (control.get('stop_condition') == 'first_confirmed_winner' and
+            snapshot.get('status') == 'winner_confirmed' and isinstance(snapshot.get('winner'), dict) and
+            bool(snapshot['winner'].get('task_id') or snapshot['winner'].get('workload_id')))
+
+
+def finalize(control, snapshot):
+    root = Path(control['local_output'])
+    snapshot['local_diagnostic_sync'] = sync_diagnostic(control, snapshot.get('diagnostic'), force=True)
+    write_report(control, snapshot, final=True)
+    exports = sync_exports(control)
+    snapshot['local_exports'] = exports
+    snapshot['report_finalized_at'] = utcnow()
+    atomic_json(root / 'snapshot.json', snapshot)
+    atomic_json(root / 'final-report.json', snapshot)
+    final_text = markdown_report(snapshot, final=True) + (
+        '\n## 本机确认产物\n\n仅按远端 export/manifest.json 的固定清单取回并核验 SHA256。\n\n```json\n' +
+        json.dumps(exports, ensure_ascii=False, indent=2) + '\n```\n')
+    final_temp = root / 'final-report.md.tmp'
+    final_temp.write_text(final_text, encoding='utf-8')
+    os.replace(str(final_temp), str(root / 'final-report.md'))
 
 
 def main():
@@ -460,7 +590,7 @@ def main():
     except BlockingIOError:
         parser.error('Another monitor holds this campaign lock')
     (root / 'monitor.pid').write_text(str(os.getpid()) + '\n')
-    deadline = timestamp(control['deadline'])
+    deadline = timestamp(control['deadline']) if control.get('deadline') else float('inf')
     interval = max(1, float(control.get('report_interval_seconds', 600)))
     started = timestamp(control['started_at'])
     next_report = started + (int(max(0, time.time() - started) // interval) + 1) * interval
@@ -472,21 +602,17 @@ def main():
             time.sleep(max(0, deadline + 5 - time.time()))
             control = json.loads(args.control.read_text())
             snapshot = sync_once(control, final=True)
-            snapshot['local_diagnostic_sync'] = sync_diagnostic(control, snapshot.get('diagnostic'), force=True)
-            write_report(control, snapshot, final=True)
-            exports = sync_exports(control)
-            snapshot['local_exports'] = exports
-            snapshot['report_finalized_at'] = utcnow()
-            atomic_json(root / 'snapshot.json', snapshot)
-            atomic_json(root / 'final-report.json', snapshot)
-            final_text = markdown_report(snapshot, final=True) + (
-                '\n## 本机确认产物\n\n仅按远端 export/manifest.json 的固定清单取回并核验 SHA256。\n\n```json\n' +
-                json.dumps(exports, ensure_ascii=False, indent=2) + '\n```\n')
-            final_temp = root / 'final-report.md.tmp'
-            final_temp.write_text(final_text, encoding='utf-8')
-            os.replace(str(final_temp), str(root / 'final-report.md'))
+            finalize(control, snapshot)
             break
         snapshot = sync_once(control)
+        if success_requested(control, snapshot):
+            snapshot = sync_once(control, final=True)
+            state = snapshot.get('gpu_stop', {}).get('container_state') or {}
+            if success_requested(control, snapshot) and state.get('Running') is False:
+                finalize(control, snapshot)
+                break
+            snapshot['monitor_status'] = 'running'
+            snapshot['awaiting_container_stop'] = True
         snapshot['local_diagnostic_sync'] = sync_diagnostic(control, snapshot.get('diagnostic'))
         atomic_json(root / 'snapshot.json', snapshot)
         now = time.time()

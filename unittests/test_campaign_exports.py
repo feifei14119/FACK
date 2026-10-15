@@ -78,3 +78,13 @@ def test_changed_export_archives_previous_verified_bytes_by_sha(tmp_path):
     third=sync_exports(control,fetcher=lambda _:envelope(b'new metadata','run/comparison.json'))
     assert third['archived']==[]
     assert len((tmp_path/'export-history.jsonl').read_text().splitlines())==1
+
+
+def test_dispatch_download_uses_fresh_direct_output_directory(tmp_path):
+    output = tmp_path / 'client/aiter/tune_out/dispatch-test'
+    value = envelope(path='task-a/selected.co')
+    value['manifest']['campaign_id'] = 'dispatch-test'
+    result = sync_exports({'local_output': str(output), 'remote_output': '/fresh',
+                           'campaign_id': 'dispatch-test'}, fetcher=lambda _: value)
+    assert result['status'] == 'verified'
+    assert read_export(tmp_path, 'dispatch-test', 'task-a/selected.co')['payload'] == b'assembly'

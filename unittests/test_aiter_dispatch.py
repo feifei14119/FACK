@@ -2,13 +2,14 @@
 
 CPU only: no aiter import, JIT, assembler or GPU.
 """
+import ast
 import copy
 import csv
 import importlib.util
 import json
 import os
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -19,6 +20,10 @@ SYMBOL = "_ZN5aiter41I8gemm_bf16_perTokenI8_BpreShuffle_32x128E"
 CO = "i8gemm/I8gemm_bf16_perTokenI8_BpreShuffle_32x128.co"
 ROW = dict(gfx="gfx942", cu_num="80", M="192", N="1280", K="1024", q_dtype_w="torch.int8",
            libtype="asm", splitK="1", kernelName=SYMBOL, kernelId="1", us="6.79", errRatio="0.0")
+BLOCK_SYMBOL = "_ZN5aiter42fp8gemm_bf16_blockscale_BpreShuffle_32x128E"
+BLOCK_CO = "fp8gemm_blockscale/fp8gemm_bf16_blockscale_BpreShuffle_32x128.co"
+BLOCK_ROW = dict(gfx="gfx942", cu_num="80", M="192", N="1280", K="1024",
+                 libtype="asm", splitK="1", kernelName=BLOCK_SYMBOL, errRatio="0.0")
 
 
 def write_csv(path, rows, fields=None):
@@ -336,3 +341,182 @@ def test_evaluator_copies_snapshot_and_requires_dispatch_evidence(tree, tmp_path
         assert result.correct is None and result.time_us is None
         assert "normal dispatch" in result.detail["error"]
     assert frozen.read_bytes() == frozen_bytes
+
+
+@pytest.fixture
+def blockscale_tree(tree):
+    write_csv(tree / "aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv", [BLOCK_ROW])
+    write_csv(tree / "hsa/gfx942/fp8gemm_blockscale/kernels.csv", [
+        dict(knl_name=BLOCK_SYMBOL, co_name=Path(BLOCK_CO).name, tile_m="32", tile_n="128",
+             bpreshuffle="1", splitK="1")])
+    (tree / "hsa/gfx942" / BLOCK_CO).write_bytes(b"blockscale original")
+    for name in d.BLOCKSCALE_UPSTREAM_FILES:
+        path = tree / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# pinned blockscale validation fixture\n")
+    return tree
+
+
+def blockscale_export(tree, tmp_path):
+    plan, snapshots = d.build_plan(tree, "gfx942", 80, ["blockscale_preshuffle"], environ={})
+    out = tmp_path / "blockscale-out"
+    with patch.object(d, "REPO", tmp_path):
+        d.export_plan(plan, snapshots, out, tree)
+    manifest = out / plan["tasks"][0]["manifest"]
+    return plan, manifest, json.loads(manifest.read_text())
+
+
+def test_blockscale_plan_freezes_full_input_and_validation_contract(blockscale_tree, tmp_path):
+    tree = blockscale_tree
+    config = tree / "aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv"
+    write_csv(config, [BLOCK_ROW, dict(BLOCK_ROW, M="193"), dict(BLOCK_ROW, M="64", splitK="8")])
+    before = config.read_bytes()
+    plan, manifest, data = blockscale_export(tree, tmp_path)
+    assert config.read_bytes() == before
+    assert len(plan["tasks"]) == 2 and len(plan["co_to_workloads"][BLOCK_CO]) == 3
+    assert plan["counts"] == {"ready_for_validation": 2, "unsupported_adapter": 1}
+    assert data["inputs"] == dict(m=192, n=1280, k=1024, family="blockscale", splitK=1,
+        bpreshuffle=True, dtype="torch.float8_e4m3fnuz", outdtype="torch.bfloat16", bias=None,
+        quantization="blockscale", scale_dtype="torch.float32", a_scale_block=[1, 128],
+        b_scale_block=[128, 128], a_scale_shape=[192, 8], b_scale_shape=[10, 8],
+        a_scale_layout="transpose_contiguous_view", b_scale_layout="row_major",
+        weight_layout=[16, 16], a_row_padding=0)
+    assert data["dispatch"]["entrypoint"] == "aiter.ops.gemm_op_a8w8.gemm_a8w8_blockscale_bpreshuffle"
+    assert set(data["dispatch"]["adapter_sha256"]) == set(d.BLOCKSCALE_ADAPTER_FILES)
+    assert set(data["dispatch"]["validation_sha256"]) == set(d.BLOCKSCALE_UPSTREAM_FILES)
+    assert set(data["upstream_resources"]) == set(d.RESOLVER_FILES + d.BLOCKSCALE_UPSTREAM_FILES)
+    assert (manifest.parent / data["resources"]["blockscale_driver"]).resolve() == common.HERE / "hsa/gfx942/driver.py"
+    assert (manifest.parent / data["resources"]["blockscale_optest"]).resolve() == common.HERE / "hsa/gfx942/optest_driver.py"
+    with patch.object(common, "UPSTREAM", tree):
+        assert common.load_manifest(manifest, "gfx942")[0] == data
+    req = dict(data, dispatch_snapshot=str(manifest.parent / data["dispatch"]["snapshot"]))
+    with patch.dict(os.environ, {}, clear=True):
+        runner.configure_dispatch(req, SimpleNamespace(multi_processor_count=80))
+        assert os.environ[d.FAMILIES["blockscale_preshuffle"][1]] == req["dispatch_snapshot"]
+        assert d.FAMILIES["a8w8"][1] not in os.environ
+    assert "aiter" not in __import__("sys").modules
+
+
+@pytest.mark.parametrize("row_update,attrs_update", [
+    ({"splitK": "2"}, {}), ({"N": "129"}, {}), ({"K": "129"}, {}),
+    ({"errRatio": "nan"}, {}), ({"errRatio": "0.01"}, {}),
+    ({"kernelName": SYMBOL}, {}), ({}, {"bpreshuffle": "0"}),
+    ({}, {"tile_n": "256"}), ({}, {"tile_m": "112"}), ({}, {"splitK": "0"}),
+])
+def test_blockscale_rejects_unreviewed_contracts(row_update, attrs_update):
+    attrs = dict(tile_m="32", tile_n="128", bpreshuffle="1", splitK="1")
+    attrs.update(attrs_update)
+    with pytest.raises(ValueError):
+        d.adapter_inputs("blockscale_preshuffle", dict(BLOCK_ROW, **row_update), {"attributes": attrs})
+
+
+def test_blockscale_supported_symbols_match_existing_optest():
+    from client.aiter.hsa.gfx942 import optest_driver
+    symbols = set()
+    for tile in (32, 48, 64, 80, 96, 128):
+        symbol = "_ZN5aiter{}fp8gemm_bf16_blockscale_BpreShuffle_{}x128E".format(43 if tile == 128 else 42, tile)
+        attrs = dict(tile_m=str(tile), tile_n="128", bpreshuffle="1", splitK="1")
+        assert d.adapter_inputs("blockscale_preshuffle", dict(BLOCK_ROW, kernelName=symbol), {"attributes": attrs})["family"] == "blockscale"
+        symbols.add(symbol)
+    assert symbols == optest_driver.SYMBOLS
+
+
+@pytest.mark.parametrize("changed", ["adapter", "upstream", "missing_hash", "inputs"])
+def test_blockscale_fingerprint_and_declared_layout_drift_fail_closed(blockscale_tree, tmp_path, changed):
+    tree = blockscale_tree
+    _, manifest, data = blockscale_export(tree, tmp_path)
+    if changed == "upstream":
+        (tree / d.BLOCKSCALE_UPSTREAM_FILES[0]).write_text("# changed test\n")
+    elif changed == "missing_hash":
+        del data["dispatch"]["adapter_sha256"][d.BLOCKSCALE_ADAPTER_FILES[0]]
+        data["dispatch"]["binding_id"] = d.binding_id(data["dispatch"])
+    elif changed == "inputs":
+        data["inputs"]["a_scale_layout"] = "row_major"
+        data["dispatch"]["inputs"] = data["inputs"]
+        data["dispatch"]["binding_id"] = d.binding_id(data["dispatch"])
+    original_sha = d.sha
+    def changed_sha(path):
+        if changed == "adapter" and Path(path) == common.HERE / "hsa/gfx942/driver.py":
+            return "0" * 64
+        return original_sha(path)
+    with patch.object(d, "sha", side_effect=changed_sha), pytest.raises(ValueError, match="blockscale"):
+        d.validate_binding(data, manifest, tree)
+
+
+@pytest.mark.parametrize("selected,split_k,backend,failure", [
+    (BLOCK_SYMBOL, 1, "asm", None), ("other", 1, "asm", "different kernel"),
+    (BLOCK_SYMBOL, 8, "asm", "different kernel"),
+    (BLOCK_SYMBOL, 1, "ck", "exactly one"),
+    (BLOCK_SYMBOL, 1, "asm", "launch failed"),
+])
+def test_blockscale_actual_public_api_observer_preserves_selection_and_zero_bias(selected, split_k, backend, failure):
+    # Execute the actual upstream public function and ASM wrapper with CPU
+    # doubles at the config/tensor/launch boundaries. No aiter import or JIT.
+    source = ast.parse((common.UPSTREAM / "aiter/ops/gemm_op_a8w8.py").read_text())
+    names = {"gemm_a8w8_blockscale_bpreshuffle", "gemm_a8w8_blockscale_bpreshuffle_asm"}
+    definitions = [node for node in source.body if isinstance(node, ast.FunctionDef) and node.name in names]
+    assert len(definitions) == 2
+    for node in definitions:
+        node.decorator_list = []
+    future = ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)
+    code = compile(ast.fix_missing_locations(ast.Module(body=[future] + definitions, type_ignores=[])), "upstream-public-api.py", "exec")
+    module = ModuleType("blockscale_public_api_cpu")
+    fills, launches, configurations, zero_bias_calls = [], [], [], []
+    out = SimpleNamespace(fill_=lambda value: fills.append(value))
+    torch = SimpleNamespace(empty=lambda *a, **kw: out, bfloat16="bf16")
+    extra = {key: SimpleNamespace(shape=shape, dtype="fp32", device="cuda") for key, shape in
+             (("a", (192, 1024)), ("packed", (1280, 1024)), ("packed_sa", (192, 8)), ("sb", (10, 8)))}
+    extra["sa"] = object()  # Raw scales must never be passed to the ASM/public API.
+    extra["zero_bias"] = object()  # Timed run's buffer must not replace normal API allocation.
+    zero_bias = object()
+    def config(*args):
+        configurations.append(args)
+        return {"libtype": backend, "kernelName": selected, "splitK": split_k}
+    def launch(*args):
+        launches.append(args)
+        if failure == "launch failed":
+            raise RuntimeError("launch failed")
+    def get_zero_bias(b):
+        zero_bias_calls.append(b)
+        return zero_bias
+    module.__dict__.update(torch=torch, dtypes=SimpleNamespace(bf16="bf16", fp16="fp16", fp8_e8m0="e8m0"),
+        get_gfx=lambda: "gfx942", _hip_blockscale_supported=lambda: True,
+        get_CKGEMM_config=config, get_zero_bias_buf=get_zero_bias,
+        AITER_CONFIGS=SimpleNamespace(AITER_CONFIG_GEMM_A8W8_BLOCKSCALE_BPRESHUFFLE_FILE="frozen.csv"),
+        _gemm_a8w8_blockscale_bpreshuffle_asm=launch,
+        gemm_a8w8_blockscale_bpreshuffle_ck=lambda *a, **kw: out)
+    exec(code, module.__dict__)
+    original = module.gemm_a8w8_blockscale_bpreshuffle_asm
+    driver = load_driver()
+    inputs = {"family": "blockscale", "splitK": 1, "bpreshuffle": True}
+    binding = {"symbol": BLOCK_SYMBOL, "inputs": inputs}
+    if failure:
+        with pytest.raises((ValueError, RuntimeError), match=failure):
+            driver.normal_call(module, inputs, extra, binding, torch)
+    else:
+        result, observed = driver.normal_call(module, inputs, extra, binding, torch)
+        assert result is out and observed == [{"symbol": BLOCK_SYMBOL, "splitK": 1, "bpreshuffle": True}]
+    assert configurations == [(192, 1280, 1024, "frozen.csv")]
+    assert module.gemm_a8w8_blockscale_bpreshuffle_asm is original
+    if failure in (None, "launch failed"):
+        assert len(fills) == 1
+        assert zero_bias_calls == [extra["packed"]]
+        assert launches == [(extra["a"], extra["packed"], out, extra["packed_sa"], extra["sb"],
+                             None, 1, BLOCK_SYMBOL, 1, zero_bias)]
+    else:
+        assert not launches and not zero_bias_calls and not fills
+
+
+def test_blockscale_dispatch_reuses_existing_full_optest_adapter():
+    driver = load_driver()
+    inputs = {"family": "blockscale", "m": 192, "n": 1280, "k": 1024}
+    selected = driver.adapter(inputs)
+    assert selected.SYMBOL == BLOCK_SYMBOL and selected.prepare is selected._base.prepare
+    case, report = object(), {"correct": True, "checks": ["ck", "ck strided x_scale", "asm", "triton"]}
+    with patch.object(driver, "adapter", return_value=selected), \
+            patch.object(selected, "prepare", return_value=case) as prepare, \
+            patch.object(selected, "validate", return_value=report) as validate:
+        assert driver.prepare(inputs, BLOCK_SYMBOL, 987) is case
+        assert driver.validate(inputs, BLOCK_SYMBOL, 987) is report
+        prepare.assert_called_once_with(inputs, BLOCK_SYMBOL, 987)
+        validate.assert_called_once_with(inputs, BLOCK_SYMBOL, 987)

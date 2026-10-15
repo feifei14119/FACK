@@ -31,9 +31,21 @@ FAMILIES = {
     "moe": ("tuned_fmoe", "AITER_CONFIG_FMOE",
             "token model_dim inter_dim expert topk act_type dtype q_dtype_a q_dtype_w q_type use_g1u1 doweight_stage1"),
 }
-ENTRYPOINTS = {"bf16": "aiter.tuned_gemm.gemm_a16w16", "a8w8": "aiter.gemm_a8w8_ASM"}
+ENTRYPOINTS = {"bf16": "aiter.tuned_gemm.gemm_a16w16", "a8w8": "aiter.gemm_a8w8_ASM",
+              "blockscale_preshuffle": "aiter.ops.gemm_op_a8w8.gemm_a8w8_blockscale_bpreshuffle"}
 RESOLVER_FILES = ["aiter/jit/core.py", "aiter/jit/utils/chip_info.py",
                   "aiter/tuned_gemm.py", "aiter/ops/gemm_op_a8w8.py"]
+BLOCKSCALE_ADAPTER_FILES = ["dispatch.py", "hsa/gfx942/dispatch_driver.py",
+                          "hsa/gfx942/gemm_driver.py", "hsa/gfx942/driver.py",
+                          "hsa/gfx942/optest_driver.py"]
+BLOCKSCALE_UPSTREAM_FILES = [
+    "op_tests/test_gemm_a8w8_blockscale.py", "aiter/test_common.py",
+    "aiter/benchmark_data_init.py", "aiter/benchmark_reporting.py",
+    "aiter/utility/dtypes.py", "aiter/utility/fp4_utils.py", "aiter/ops/shuffle.py",
+    "aiter/ops/triton/gemm/basic/gemm_a8w8_blockscale.py",
+    "csrc/py_itfs_cu/asm_a8w8_blockscale_bpreshuffle.cu",
+    "csrc/ck_gemm_a8w8_blockscale_bpreshuffle/gemm_a8w8_blockscale_bpreshuffle.cu",
+]
 
 
 def sha(path):
@@ -115,7 +127,7 @@ def catalog_index(upstream, arch):
 
 
 def adapter_inputs(family, row, match):
-    """Accept only contracts already implemented by gemm_driver, without repairs."""
+    """Accept only contracts implemented by the reviewed drivers, without repairs."""
     if family not in ENTRYPOINTS:
         raise ValueError("no reviewed dispatch/op_test adapter for this family")
     if int_value(row.get("splitK", "-1")) != 1:
@@ -127,6 +139,25 @@ def adapter_inputs(family, row, match):
     if min(shape.values()) <= 0 or shape["k"] % 128:
         raise ValueError("adapter requires positive MNK and K divisible by 128")
     attrs = match["attributes"]
+    if family == "blockscale_preshuffle":
+        tile_m = int_value(attrs.get("tile_m", "-1"))
+        expected = "_ZN5aiter{}fp8gemm_bf16_blockscale_BpreShuffle_{}x128E".format(
+            43 if tile_m == 128 else 42, tile_m)
+        if (tile_m not in (32, 48, 64, 80, 96, 128) or
+                int_value(attrs.get("tile_n", "-1")) != 128 or
+                row["kernelName"] != expected or int_value(attrs.get("splitK", "-1")) != 1 or
+                not boolean(attrs.get("bpreshuffle", "0"))):
+            raise ValueError("blockscale adapter requires a reviewed preshuffled x128 splitK=1 catalog symbol")
+        if shape["n"] % 128:
+            raise ValueError("blockscale adapter requires N divisible by 128")
+        return dict(shape, family="blockscale", bpreshuffle=True, splitK=1,
+                    dtype="torch.float8_e4m3fnuz", outdtype="torch.bfloat16", bias=None,
+                    quantization="blockscale", scale_dtype="torch.float32",
+                    a_scale_block=[1, 128], b_scale_block=[128, 128],
+                    a_scale_shape=[shape["m"], shape["k"] // 128],
+                    b_scale_shape=[shape["n"] // 128, shape["k"] // 128],
+                    a_scale_layout="transpose_contiguous_view", b_scale_layout="row_major",
+                    weight_layout=[16, 16], a_row_padding=0)
     if family == "a8w8":
         if row["q_dtype_w"] != "torch.int8" or not row["kernelName"].startswith("_ZN5aiter") or "I8gemm_bf16_perTokenI8_BpreShuffle_" not in row["kernelName"]:
             raise ValueError("adapter is per-token INT8 ASM; FP8 uses another entrypoint")
@@ -305,6 +336,17 @@ def validate_binding(data, manifest, upstream=UPSTREAM):
     for relative, digest in binding["resolver_sha256"].items():
         if sha(inside(Path(upstream), relative)) != digest:
             raise ValueError("upstream resolver changed; review and regenerate dispatch plan")
+    if family == "blockscale_preshuffle":
+        _, catalog_rows = read_csv(inside(Path(upstream) / "hsa" / data["arch"], data["catalog"]))
+        matches = [row for _, row in catalog_rows if row.get("knl_name") == data["symbol"] and
+                   row.get("co_name") == Path(data["co"]).name]
+        if len(matches) != 1 or adapter_inputs(family, binding["row"], {"attributes": matches[0]}) != data["inputs"]:
+            raise ValueError("blockscale inputs differ from the reviewed CSV adapter contract")
+        for key, root, required in (("adapter_sha256", HERE, BLOCKSCALE_ADAPTER_FILES),
+                                    ("validation_sha256", Path(upstream), BLOCKSCALE_UPSTREAM_FILES)):
+            hashes = binding.get(key, {})
+            if set(hashes) != set(required) or any(sha(inside(root, name)) != hashes[name] for name in required):
+                raise ValueError("blockscale adapter/validation source changed; review and regenerate dispatch plan")
     return snapshot
 
 
@@ -333,6 +375,9 @@ def export_plan(plan, snapshots, out, upstream=UPSTREAM):
                    "catalog_sha256": sha(Path(upstream) / "hsa" / plan["arch"] / match["catalog"]),
                    "original_co_sha256": sha(Path(upstream) / "hsa" / plan["arch"] / match["co"]),
                    "scope": "exact-row dispatch using frozen arch/CU config override"}
+        if ref["family"] == "blockscale_preshuffle":
+            binding["adapter_sha256"] = {name: sha(HERE / name) for name in BLOCKSCALE_ADAPTER_FILES}
+            binding["validation_sha256"] = {name: sha(Path(upstream) / name) for name in BLOCKSCALE_UPSTREAM_FILES}
         binding["binding_id"] = binding_id(binding)
         manifest = {"schema_version": 1, "arch": plan["arch"], "co": match["co"],
                     "symbol": ref["symbol"], "catalog": match["catalog"],
@@ -345,6 +390,11 @@ def export_plan(plan, snapshots, out, upstream=UPSTREAM):
                     "upstream_resources": RESOLVER_FILES + [
                         "op_tests/test_gemm_a16w16.py", "op_tests/test_gemm_a8w8.py",
                         "csrc/py_itfs_cu/asm_gemm_a8w8.cu", "csrc/py_itfs_cu/asm_gemm_a16w16.cu"]}
+        if ref["family"] == "blockscale_preshuffle":
+            manifest["resources"].update(
+                blockscale_driver=os.path.relpath(HERE / "hsa/gfx942/driver.py", out),
+                blockscale_optest=os.path.relpath(HERE / "hsa/gfx942/optest_driver.py", out))
+            manifest["upstream_resources"] = RESOLVER_FILES + BLOCKSCALE_UPSTREAM_FILES
         # Paths must remain valid when copying the repository to another host.
         path = out / (task_id + ".json")
         path.write_text(json.dumps(manifest, indent=2) + "\n")

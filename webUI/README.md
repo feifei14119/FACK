@@ -160,6 +160,16 @@ python3 tools/aiter_campaign_monitor.py --control client/aiter/tune_out/campaign
 相关检查：`python3 -m pytest -q unittests/test_campaign_diagnostics.py unittests/test_campaign_monitor.py unittests/test_campaign_exports.py`
 与 `node --test webUI/campaign_view.test.cjs`。
 
+新的 CSV 调优任务可以保存于 `client/aiter/tune_out/dispatch-<id>/`。控制文件设置
+`state_files: ["plan.json", "progress.json", "remaining.json"]`、`deadline: null` 与
+`stop_condition: "first_confirmed_winner"`，每 60 秒同步、每 600 秒按 `started_at` 时点写报告。
+监控按 `task_id` / `workload_id` 合并进度，同一 `.co` 的不同尺寸保持独立；MNK 与 CSV 文件、行号
+来自本次 plan/记录。`remaining-workloads.csv` 保留全部未完成 CSV 引用，`co-coverage.csv`
+保留关联 workload 与无引用原因。静态 CSV 原有耗时不作为本次测量。
+只有本次 `status=winner_confirmed` 且存在 winner 身份后，监控才重新读取专用容器状态；
+实际 `Running=false` 后写最终报告并取回 manifest 中的本次采用产物。
+胜出结论仅适用于记录中已验证的 workload，其他尺寸的 unsupported / coverage 评估仍独立展示。
+
 页面分别显示远端状态更新时间、最近成功通信时间和本机同步尝试时间；SSH 或文件读取失败
 不会把旧记录当作新进度。范围外对象单列；blocked 和没有实测的对象保留在待完成清单。
 仅从任务快照展示性能字段，“结果 / 技能”页也展示远端快照中的逐 workload 实测，同时保留本机记录与归档实测。

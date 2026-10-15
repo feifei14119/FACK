@@ -31,6 +31,9 @@
         const local = campaign.local_exports || {};
         const localFiles = local.status === 'verified' ? local.files || [] : [];
         const ratio = count.target_count ? Math.min(100, 100 * count.finished / count.target_count) : 0;
+        const winningRow = campaign.winner && (campaign.kernels || []).find(r =>
+          window.FACKWorkloadView.key(r) === (campaign.winner.task_id || campaign.winner.workload_id));
+        const assessment = campaign.winner && (campaign.winner.coverage_assessment || campaign.winner.assess_summary || {});
         return '<article class="card campaign-card"><h3>' + esc(campaign.campaign_id) + '</h3>' +
           '<p class="campaign-connection ' + (!sync.connected || (age > 180 && !stopped) ? 'campaign-error' : '') + '">' + esc(warning) +
           ' · ' + (stopped ? '周期监控已结束' : dead ? '已到截止时间，正在收尾同步' : '周期监控运行中') + '</p>' +
@@ -39,15 +42,30 @@
           '<dl class="campaign-meta"><div><dt>阶段 / 远端状态</dt><dd>' + esc(campaign.phase) + ' / ' + esc(campaign.status) + '</dd></div>' +
           '<div><dt>当前步骤</dt><dd>' + esc(campaign.active_step) + '</dd></div>' +
           '<div><dt>当前 .co</dt><dd>' + esc(campaign.current_co) + '</dd></div>' +
+          '<div><dt>当前 workload / task</dt><dd>' + esc(campaign.current_task_id) + '</dd></div>' +
           '<div><dt>本机同步尝试</dt><dd>' + esc(date(sync.attempted_at)) + '</dd></div>' +
           '<div><dt>最近成功通信</dt><dd>' + esc(date(sync.last_success_at)) + '</dd></div>' +
           '<div><dt>远端状态更新时间</dt><dd>' + esc(date(campaign.remote_updated_at)) + '</dd></div>' +
-          '<div><dt>硬截止（本机时区）</dt><dd>' + esc(date(campaign.deadline)) + '</dd></div></dl>' +
+          '<div><dt>停止条件</dt><dd>' + esc(campaign.deadline ? date(campaign.deadline) : '首个严格确认胜出，并确认专用容器停止') + '</dd></div></dl>' +
           '<p>GPU 停止核验：<strong>' + esc((campaign.gpu_stop || {}).status || 'not_checked') + '</strong></p>' +
           window.FACKCampaignView.diagnostic(campaign.diagnostic) +
-          '<p>已知 <strong>' + esc(count.known) + '</strong> 个 .co；本次范围 <strong>' + esc(count.target_count) +
+          '<p>已知 <strong>' + esc(count.known) + '</strong> 个 ' + (campaign.row_identity === 'workload' ? 'workload' : '.co') + '；本次范围 <strong>' + esc(count.target_count) +
           '</strong>；范围外 ' + esc(count.out_of_scope) + '；已完成 ' + esc(count.finished) + '；待完成 ' + esc(count.remaining) + '</p>' +
           '<p class="desc">类别：' + esc(JSON.stringify(campaign.category_counts || {})) + '</p>' +
+          (campaign.coverage_counts ? '<details data-detail-key="coverage-' + esc(campaign.campaign_id) + '"><summary>CSV / .co 覆盖与未调优原因 · ' +
+            esc(campaign.coverage_counts.csv_references) + ' 条引用 / ' + esc(campaign.coverage_counts.known_co) + ' 个 .co</summary>' +
+            '<p>剩余 workload ' + esc(campaign.coverage_counts.remaining_workloads) + '；无引用 .co ' + esc(campaign.coverage_counts.unreferenced_co) +
+            '。完整清单保存于本机 remaining-workloads.csv 与 co-coverage.csv；下方按搜索条件显示前 100 条。</p><pre>' +
+            esc(JSON.stringify((campaign.remaining_workloads || []).filter(r => !query || JSON.stringify(r).toLowerCase().includes(query)).slice(0, 100), null, 2)) +
+            '</pre></details>' : '') +
+          (campaign.winner ? '<div><p><strong>本次严格确认胜出 · 仅限已验证 workload</strong></p>' +
+            window.FACKWorkloadView.summary((winningRow || {}).workload) +
+            window.FACKCampaignView.metrics((winningRow || {}).metrics) +
+            '<p>覆盖评估：' + esc(assessment.status || '见完整记录') +
+            (assessment.counts ? '；关联通过 ' + esc(assessment.counts.pass) + '，unsupported ' + esc(assessment.counts.unsupported) : '') +
+            '；不表示同 .co 其他用途均可替换。</p>' +
+            '<details class="artifact-details" data-detail-key="winner-' + esc(campaign.campaign_id) + '"><summary>胜出完整证据与产物路径</summary><pre>' +
+            esc(JSON.stringify(campaign.winner, null, 2)) + '</pre></details></div>' : '') +
           (localFiles.length ? '<details class="campaign-local-exports artifact-details" data-detail-key="exports-' + esc(campaign.campaign_id) + '"><summary>产物路径信息 · 本机确认产物 · ' + localFiles.length +
             ' 个文件已核验 SHA256</summary><ul>' + localFiles.map((file) => '<li><a href="/api/campaign/export?campaign=' +
               encodeURIComponent(campaign.campaign_id) + '&amp;file=' + encodeURIComponent(file.path) + '">下载 ' + esc(file.path) +
@@ -63,7 +81,7 @@
             local_diagnostic_sync: campaign.local_diagnostic_sync,
             local_exports: campaign.local_exports || {status: '尚未取回；下表为远端产物'}
           }, null, 2)) + '</pre></details>' +
-          '<p class="desc">显示 ' + rows.length + ' / ' + (campaign.kernels || []).length + ' 个已知 .co</p>' +
+          '<p class="desc">显示 ' + rows.length + ' / ' + (campaign.kernels || []).length + ' 个运行条目；同 .co 不同尺寸独立计数。</p>' +
           '<div class="campaign-table-wrap"><table class="campaign-table"><thead><tr><th>.co / 类别</th><th>状态 / 结果阶段</th><th>原因</th><th>测试 workload / 实际性能</th><th>任务与产物</th></tr></thead><tbody>' +
           rows.map((r) => '<tr><td><code>' + esc(r.co) + '</code><br><small>' + esc(r.category) + '</small></td><td>' +
             esc(r.status) + '<br><small>' + esc(r.result_stage || r.phase || '') + '</small></td><td>' + esc(r.reason) +

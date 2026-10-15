@@ -23,17 +23,30 @@
   }
   function metrics(value) {
     if (!value || !Object.keys(value).length) return '<span class="desc">尚无实测</span>';
-    const screen = value.original_screen || {};
+    const original = value.original_screen || {};
+    const screen = original.measurement || original;
     const final = value.final || {};
+    const cross = value.cross_shape_results && typeof value.cross_shape_results === 'object' ? value.cross_shape_results : {};
     const invalid = value.valid_for_adoption === false;
     const decision = value.campaign_decision || final.status;
     const names = {original_retained: "保留原始", retained_original: "保留原始",
       candidate_adopted: "采用候选", candidate_selected: "采用候选", adopted: "采用候选",
-      confirmed_gain: "采用候选", final_recommended: "候选获最终推荐"};
+      confirmed_gain: "采用候选", final_recommended: "候选获最终推荐", winner_confirmed: "当前 workload 已严格确认"};
     let html = '<div class="campaign-metric-summary">';
+    let opLabel = 'op_test';
     if (invalid) html += '<p class="campaign-error"><strong>候选验证失败，不可采用</strong><br>' +
       '后续静态审计未通过；历史配对结果不计为有效收益。审计记录见完整字段。</p>';
-    if (screen.status === "measured" && screen.correct === true) {
+    if (Array.isArray(screen.samples)) {
+      const correct = screen.samples.filter(s => s.result && s.result.correct === true);
+      const graph = correct.map(s => s.result.time_us).filter(v => typeof v === 'number' && Number.isFinite(v));
+      const opRows = correct.flatMap(s => (((s.result.detail || {}).runner || {}).op_test || {}).rows || []);
+      const distributions = new Set(opRows.map(row => JSON.stringify([row.data_init, row.scale_init])));
+      if (distributions.size > 1) opLabel = 'op_test（多分布 aggregate screen）';
+      const op = opRows.map(r => r['asm us']).filter(v => typeof v === 'number' && Number.isFinite(v));
+      const range = values => values.length ? number(Math.min(...values)) + '–' + number(Math.max(...values)) + ' µs' : '未记录';
+      html += '<p><strong>原始筛选 · screening</strong><br>正确样本 ' + correct.length + ' / ' + screen.samples.length +
+        '<br>HIP graph：' + range(graph) + '<br>' + opLabel + '：' + range(op) + '</p>';
+    } else if (screen.status === "measured" && screen.correct === true) {
       html += '<p><strong>原始筛选 · screening</strong><br>' + number(screen.time_us) + ' µs · ' +
         number(screen.tflops) + ' TFLOPS<br><small>有效样本 ' + esc(screen.valid_samples) + '</small></p>';
     } else if (Object.keys(screen).length) {
@@ -42,7 +55,19 @@
     html += '<p>候选：准备 ' + esc(value.prepared_candidates) + ' / 尝试 ' + esc(value.attempted_candidates) +
       ' / 有效实测 ' + esc(value.valid_measured_candidates) + '</p>';
     if (value.screened_candidates != null) html += '<p>已筛选 ' + esc(value.screened_candidates) + '</p>';
-    const decisionText = decision === 'final_recommended' && value.valid_for_adoption === true ? '采用候选' :
+    const candidateScreens = (Array.isArray(value.candidate_screens) ? value.candidate_screens : [])
+      .filter(row => row && row.correct === true && row.hip_graph &&
+        typeof row.hip_graph.median_us === 'number' && Number.isFinite(row.hip_graph.median_us) &&
+        row.hip_graph.median_us > 0);
+    const bestScreen = candidateScreens.reduce((best, row) => !best ||
+      row.hip_graph.median_us < best.hip_graph.median_us ? row : best, null);
+    if (bestScreen) html += '<p><strong>候选筛选 · screening（未独立确认）</strong><br>' +
+      'HIP graph 中位数最低的正确候选：' + identity(bestScreen.candidate_id) +
+      '<br>HIP graph：' + number(bestScreen.hip_graph.median_us) + ' µs' +
+      '<br>' + opLabel + '：' + number((bestScreen.op_test || {}).median_us) + ' µs' +
+      '<br><small>有效样本 ' + esc(bestScreen.valid_samples) + '；筛选值不代表已确认收益。</small></p>';
+    const decisionText = !decision && Object.keys(cross).length ? '固定候选复测已完成；未独立搜索' :
+      decision === 'final_recommended' && value.valid_for_adoption === true ? '采用候选' :
       decision ? names[decision] || decision : '尚未决定';
     html += '<p><strong>最终：' + esc(invalid ? '候选验证失败，不可采用' : decisionText) + '</strong>' +
       (final.reason ? '<br><small>' + esc(final.reason) + '</small>' : '') + '</p>';
@@ -53,6 +78,12 @@
     const earlier = pairs.filter((row) => row.stage !== 'final');
     if (earlier.length) html += '<details><summary>确认阶段配对记录 · ' + earlier.length +
       ' 项（参考可能为当时候选）</summary>' + earlier.map(paired).join('') + '</details>';
+    if (Object.keys(cross).length) html += '<details><summary>关联尺寸固定候选复测 · ' + Object.keys(cross).length +
+      ' 种方法（不代表独立搜索或整体胜出）</summary>' + Object.entries(cross).map(([method, row]) =>
+        '<p><strong>' + esc(method) + '</strong> · ' + esc(row.pairs) + ' 对<br>参考 ' +
+        number(row.reference_median_us) + ' µs / 候选 ' + number(row.candidate_median_us) +
+        ' µs<br>判定 ' + esc(row.verdict) + ' · 比值界限 [' + number(row.lower_ratio_bound) + ', ' +
+        number(row.upper_ratio_bound) + ']</p>').join('') + '</details>';
     html += '</div><details><summary>完整实测字段</summary><pre>' + esc(JSON.stringify(value, null, 2)) + '</pre></details>';
     return html;
   }

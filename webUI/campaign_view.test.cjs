@@ -85,3 +85,56 @@ test('local original evidence displays times without inventing correctness or ad
   assert.match(html, /243.1/);
   assert.doesNotMatch(html, /正确性 false/);
 });
+test('engine original batch exposes correct sample graph and op_test ranges', () => {
+  const html = view.metrics({original_screen:{measurement:{status:'measured',correct:true,samples:[
+    {result:{correct:true,time_us:6.1,detail:{runner:{op_test:{rows:[{'asm us':6.7}]}}}}},
+    {result:{correct:false,time_us:1,detail:{}}}
+  ]}}});
+  assert.match(html, /正确样本 1 \/ 2/);
+  assert.match(html, /HIP graph：6.1–6.1/);
+  assert.match(html, /op_test：6.7–6.7/);
+});
+
+test('best correct graph screen stays explicitly unconfirmed with all candidates in details', () => {
+  const html = view.metrics({candidate_screens:[
+    {candidate_id:'wrong', correct:false, hip_graph:{median_us:1}},
+    {candidate_id:'missing', correct:true, hip_graph:{median_us:null}},
+    {candidate_id:'zero', correct:true, hip_graph:{median_us:0}},
+    {candidate_id:'slower', correct:true, hip_graph:{median_us:7}},
+    {candidate_id:'best<script>', correct:true, valid_samples:3, hip_graph:{median_us:6.2}, op_test:{median_us:6.8}}
+  ]});
+  const summary = html.split('</div><details>')[0];
+  assert.match(summary, /screening（未独立确认）/);
+  assert.match(summary, /best&lt;script&gt;/);
+  assert.match(summary, /HIP graph：6.2 µs/);
+  assert.match(summary, /op_test：6.8 µs/);
+  assert.match(summary, /有效样本 3；筛选值不代表已确认收益/);
+  assert.doesNotMatch(summary, /wrong|slower|配对收益|<script>/);
+  assert.match(html, /slower/);
+});
+
+test('multiple op_test distributions are labeled aggregate only in screening', () => {
+  const methods = ['hip_graph', 'op_test:constant/constant', 'op_test:uniform/auto'];
+  const html = view.metrics({original_screen:{measurement:{samples:[{result:{correct:true,time_us:6,
+    detail:{runner:{op_test:{rows:[{data_init:'constant',scale_init:'constant','asm us':7},
+      {data_init:'uniform',scale_init:'auto','asm us':8}]}}}}}]}},
+    paired_results:methods.map(method => ({method, stage:'final', scope:'independent_paired', reference_id:'original', pairs:8}))});
+  const summary = html.split('</div><details>')[0];
+  assert.match(summary, /op_test（多分布 aggregate screen）：7–8 µs/);
+  for (const method of methods) assert.ok(summary.includes('独立配对 · ' + method));
+  assert.equal((summary.match(/独立配对 · /g) || []).length, 3);
+});
+
+test('fixed candidate cross checks preserve method verdicts without inventing search winners', () => {
+  const value = {cross_shape_results: {
+    hip_graph:{pairs:8,verdict:'inconclusive',reference_median_us:7,candidate_median_us:6.9,lower_ratio_bound:1.006},
+    'op_test:constant/constant':{pairs:8,verdict:'confirmed_gain'},
+    'op_test:uniform/auto':{pairs:8,verdict:'confirmed_gain'}}};
+  const html = view.metrics(value);
+  assert.match(html, /固定候选复测已完成；未独立搜索/);
+  assert.match(html, /3 种方法（不代表独立搜索或整体胜出）/);
+  assert.match(html, /判定 inconclusive/);
+  assert.doesNotMatch(html.split('</div><details>')[0], /采用候选|配对收益/);
+  const retained = view.metrics({...value, campaign_decision:'original_retained'});
+  assert.match(retained, /最终：保留原始/);
+});

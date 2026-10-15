@@ -77,6 +77,10 @@ python3 client/aiter/dispatch.py lookup \
 
 - INT8 per-token ASM，BF16 输出、FP32 scales/bias、preshuffle、splitK=1，N 为 256 的倍数、K 为 128 的倍数。
 - BF16 TN ASM，BF16 输出、无 bias/scaleAB、splitK=1，N 为 64 的倍数、K 为 128 的倍数，layout 与 catalog 一致。
+- FP8 blockscale preshuffle ASM，gfx942 FP8 输入、BF16 输出、无 bias、splitK=1，N/K 为 128 的倍数。
+  仅支持已审核的 tile M=32/48/64/80/96/128、tile N=128 对象。FP32 A scales 按 1×128、B scales 按
+  128×128 分块；A scale 的连续存储是逻辑 `(M,K/128)` 的转置字节再 view 回原形状，B scale 为行主序。
+  B 使用 `(16,16)` shuffle，A 不补行尾 padding。上述选择全部写入 `inputs`，不使用 MX scales 或普通 blockscale 入口。
 - CSV 已报告非零或非有限误差的行不能直接导出；先调查原始 kernel 的数值问题。
 
 其他 GEMM/splitK/layout 需要匹配的 driver，不能把 splitK 改成 1 或缩小 MNK 来强行接入。
@@ -88,6 +92,9 @@ MLA 的 `mla_asm.csv` 是 kernel 属性目录，不含完整 batch/KV 分布，�
 
 可将仓库和新计划一起复制到目标 checkout；计划中的 manifest/driver/快照路径可随仓库迁移。
 固定源码、原始 `.co`、catalog 和快照的散列必须匹配。源码更新后重新审核、生成计划，不手改散列绕过检查。
+blockscale plan 还在 binding 中保存 `adapter_sha256` 与 `validation_sha256`，分别冻结本地 adapter 链和
+上游测试、benchmark、dtype/shuffle、CK/ASM/Triton 实现；加载 manifest 时即检查。所有资源也进入 client
+fingerprint。扩展 adapter 后应生成新目录，不修改正在运行的冻结 plan。
 `tasks[].commands` 是从仓库根执行的 argv 数组；将 `CANDIDATE.s` 替换成确定的候选文件。
 引擎使用 `python3.8`（没有时用 `python3`）；runner 通过 `--python` 选择已验证 ROCm Python。
 
@@ -110,14 +117,19 @@ CSV-bound manifest 会拒绝改变 `--m/--n/--k`。driver 也不能换成默认 
 每个 candidate 使用新 runner，并按顺序执行：
 
 1. 校验实际 gfx/CU；在导入 aiter 前配置独立的 CSV 副本。
-2. 用正常入口 `aiter.gemm_a8w8_ASM` 或 `aiter.tuned_gemm.gemm_a16w16` 选择 kernel。
+2. 用正常入口 `aiter.gemm_a8w8_ASM`、`aiter.tuned_gemm.gemm_a16w16` 或
+   `aiter.ops.gemm_op_a8w8.gemm_a8w8_blockscale_bpreshuffle` 选择 kernel。
    观察入口传给 ASM 的 symbol/splitK/layout；不在这个检查中强制替换选中值。不同选择直接失败。
 3. 校验正常入口的完整输出，确认 host `LoadKernel` 指向当前 candidate overlay。
-4. 复用 reviewed GEMM driver：两组独立数值参考、上游单目标 op_test wrapper、HIP graph 计时和计时后完整输出检查。
+4. 复用 reviewed driver：两组独立数值参考、上游单目标 op_test、HIP graph 计时和计时后完整输出检查。
+   blockscale 复用 `driver.py` 的共享输入和 `optest_driver.py` 的完整验证，正常入口自行分配零 bias，
+   不注入固定目标运行的 `zero_bias_buf`。op_test 保持 constant/constant 与 uniform/auto 两组分布，
+   检查 CK、strided CK、目标 ASM 和 Triton 的完整输出，沿用已审核 CK 默认分支与 symbol 绑定。
 
 `result.json.dispatch_check` 记录入口、workload ID、CU、快照 SHA 和观察到的选择。
 这是正常入口与 host loader 的证据，仍不等于 GPU ATT；性能报告测的是选定 ASM 算子，不含 Python dispatch 开销。
-op_test 是锁定上游文件中的单目标 benchmark wrapper，不是整个多 backend 测试套件。
+BF16/INT8 op_test 是锁定上游文件中的单目标 benchmark wrapper；blockscale 调用锁定文件的单 shape
+`test_gemm` 多 backend 验证，不执行 CLI 或其他 shape 的 split-K 扫描。
 
 original 验证通过后，用任务的 `tune_init` 命令接入 `tools/tune_run.py`，再按现有调优流程执行。
 MFMA 调度继续读取 `selfstudy/gfx942/mfma_issue/skills_out/skills/mfma-interleave-gfx942/`，不重跑自学。
@@ -161,3 +173,7 @@ python3 client/aiter/dispatch.py assess "$AIT_PLAN/plan.json" \
 可导出 22 个 INT8 workload，涉及 6 个 `.co`。例如 `I8gemm_bf16_perTokenI8_BpreShuffle_32x128.co` 的
 M/N/K=192/1280/1024 和 192/1536/1024 都保留，splitK 均为 1；192/128/5120 的 splitK=8 行保留为待调查，
 没有改尺寸或把原始 CSV 非零误差当成通过。新派发检查已做 CPU 协议测试，尚未在 GPU 上实测；本次不产生新的性能收益结论。
+
+blockscale preshuffle 扩展另以 CPU 协议检查上游真实公开函数的 ASM 分支、完整输入转发、正常零 bias
+分配、错选/回退/异常恢复及源码漂移拒绝。它复用已有数值验证，并不证明新 CSV workload 的 seed 已通过；
+新 manifest 仍须在目标机器逐 workload 验证原版。

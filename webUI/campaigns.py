@@ -64,7 +64,9 @@ def read_diagnostic(root, diagnostic):
 def read_campaigns(repo):
     repo = Path(repo).resolve()
     campaigns, errors = [], []
-    for path in sorted(repo.glob('client/*/tune_out/campaigns/*/snapshot.json')):
+    paths = list(repo.glob('client/*/tune_out/campaigns/*/snapshot.json'))
+    paths += list(repo.glob('client/aiter/tune_out/dispatch-*/snapshot.json'))
+    for path in sorted(paths):
         try:
             path.resolve().relative_to(repo)
             if path.stat().st_size > 64 * 1024 * 1024:
@@ -103,7 +105,13 @@ def read_export(repo, campaign_id, relative_path):
     if not re.fullmatch(r'[A-Za-z0-9_.-]+', campaign_id or '') or campaign_id in ('.', '..'):
         raise ValueError('invalid campaign ID')
     repo = Path(repo).resolve()
-    root = repo / 'client/aiter/tune_out/campaigns' / campaign_id
+    roots = [repo / 'client/aiter/tune_out/campaigns' / campaign_id]
+    if campaign_id.startswith('dispatch-'):
+        roots.append(repo / 'client/aiter/tune_out' / campaign_id)
+    existing = [root for root in roots if (root / 'exports-sync.json').is_file()]
+    if len(existing) != 1:
+        raise ValueError('campaign export directory missing or ambiguous')
+    root = existing[0]
     root.resolve().relative_to(repo)
     relative = Path(relative_path)
     if relative.is_absolute() or '..' in relative.parts or relative.name not in EXPORT_NAMES or '\\' in relative_path:
