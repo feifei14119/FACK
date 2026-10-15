@@ -14,6 +14,7 @@ import os
 import re
 import shlex
 import signal
+import shutil
 import subprocess
 import sys
 import threading
@@ -34,7 +35,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)                 # webUI 的上一级 = 仓库根
 sys.path.insert(0, REPO)
 import client as _clients  # noqa: E402
-from webUI.results import read_results as _read_results  # noqa: E402
+from webUI.results import read_results as _read_results, campaign_results  # noqa: E402
+from webUI.campaigns import read_campaigns, read_export  # noqa: E402
+from webUI.workloads import read_plans  # noqa: E402
+from webUI.workflow import ACTIONS as WORKFLOW_ACTIONS, command as workflow_command  # noqa: E402
 RUNS_DIR = os.path.join(HERE, ".runs")       # 作业日志落这里
 os.makedirs(RUNS_DIR, exist_ok=True)
 
@@ -77,7 +81,18 @@ def build_command(action, p):
     """返回 (title, argv, cwd, env_extra) 或抛 ValueError。p 是前端传来的参数 dict。"""
     p = p or {}
 
+    if action in WORKFLOW_ACTIONS:
+        try:
+            return workflow_command(action, p, REPO)
+        except (OSError, KeyError, TypeError) as exc:
+            raise ValueError("workload 操作参数或依赖不完整: " + str(exc))
+
     if action == "tune":
+        client_params, selected_env = None, {}
+        if p.get("plan"):
+            _, validation, _, selected_env = workflow_command("dispatch_validate", p, REPO)
+            p = dict(p, seed=validation[2], client="aiter/hsa/gfx942")
+            client_params = validation[validation.index("--") + 1:]
         region = p.get("region", "loop")
         if not _region_ok(region):
             raise ValueError("非法 region: %s" % region)
@@ -91,7 +106,7 @@ def build_command(action, p):
             raise ValueError("seed 文件不存在: %s" % seed)
         spec = (p.get("client") or "").strip()
         if not spec:
-            raise ValueError("缺少 client（client/ 下的路径，例如 poc_kl/fp8_blockscale_gemm）")
+            raise ValueError("缺少 client（例如 aiter/hsa/gfx942）")
         try:
             spec = _clients.resolve(spec).spec
         except ValueError as exc:
@@ -107,25 +122,23 @@ def build_command(action, p):
         argv.append("--results")
         if p.get("model"):
             argv += ["--model", str(p["model"]).strip()]
-        argv += ["--"] + _tokens(p.get("params"))
-        env = {}
+        argv += ["--"] + (client_params if client_params is not None else _tokens(p.get("params")))
+        env = dict(selected_env)
         if p.get("apikey"):
             env["CURSOR_API_KEY"] = str(p["apikey"]).strip()
         return ("调优 tune.mjs · region=%s rounds=%d" % (region, rounds),
                 argv, REPO, env)
 
     if action == "tune_quick":
-        return ("快跑 tune_quick.sh",
-                ["bash", "client/poc_kl/tune_script/tune_quick.sh"], REPO, {})
+        raise ValueError("旧 poc_kl 脚本已移除，请选择 CSV workload")
 
     if action == "tune_tail":
-        return ("尾段 tune_prologue_epilogue.sh",
-                ["bash", "client/poc_kl/tune_script/tune_prologue_epilogue.sh"], REPO, {})
+        raise ValueError("旧 poc_kl 脚本已移除，请选择 CSV workload")
 
     if action == "mine":
         corpus = (p.get("corpus") or "").strip()
         out = (p.get("out") or "study_case/study_out").strip()
-        argv = [PY38, "tools/mine_corpus.py"]
+        argv = [shutil.which(PY38) or PY, "tools/mine_corpus.py"]
         if corpus:
             argv += ["--corpus", corpus]
         if out:
@@ -133,8 +146,7 @@ def build_command(action, p):
         return ("学习/挖掘 mine_corpus.py (Layer 1)", argv, REPO, {})
 
     if action == "mine_full":
-        return ("完整挖掘 mine_skills.sh (L1+L2)",
-                ["bash", "study_case/study_script/mine_skills.sh"], REPO, {})
+        raise ValueError("普通调优复用已有 skill；请使用独立的静态挖掘或自学流程")
 
     if action == "articulate":
         argv = ["node", "tools/sdk/articulate.mjs"]
@@ -146,21 +158,12 @@ def build_command(action, p):
         return ("Layer 2 离线 AI 归纳 articulate.mjs", argv, REPO, env)
 
     if action == "test":
-        return ("运行单元测试 unittest",
-                [PY38, "-m", "unittest", "discover", "-s", "unittests", "-t", ".", "-v"],
+        return ("运行 CPU 单元测试 pytest",
+                [PY, "-m", "pytest", "-q", "unittests"],
                 REPO, {})
 
     if action == "hw_validate":
-        cand = (p.get("candidate") or "").strip()
-        if not cand:
-            raise ValueError("缺少候选 .s 路径")
-        cand_abs = cand if os.path.isabs(cand) else os.path.join(REPO, cand)
-        if not os.path.isfile(cand_abs):
-            raise ValueError("候选文件不存在: %s" % cand)
-        runs = _clip_int(p.get("runs"), 1, 200, 10)
-        argv = ["bash", "tools/hw_validate.sh", cand_abs, str(runs)]
-        argv += _tokens(p.get("ks"))
-        return ("真机验证 hw_validate.sh", argv, REPO, {})
+        raise ValueError("请使用逐 workload 的 client / op_test 验证")
 
     raise ValueError("未知动作: %s" % action)
 
@@ -246,7 +249,11 @@ def job_public(job):
 
 # ------------------------------------------------------------------ results
 def read_results():
-    return _read_results(REPO, _clients.list_clients())
+    result = _read_results(REPO, _clients.list_clients())
+    remote = campaign_results(REPO)
+    result['results'] = remote['results'] + result['results']
+    result['errors'] += remote['errors']
+    return result
 
 
 def list_skills():
@@ -258,6 +265,8 @@ def list_skills():
         if os.path.isdir(p):
             names = sorted(n for n in os.listdir(p) if n.endswith(".json"))
         res[label] = names
+    from pathlib import Path
+    res['agent'] = sorted(p.parent.name for p in (Path(REPO) / 'knowledge/skills').glob('*/SKILL.md'))
     return res
 
 
@@ -332,6 +341,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(pub)
         if path == "/api/results":
             return self._json(read_results())
+        if path == "/api/workloads":
+            return self._json(read_plans(REPO))
+        if path == "/api/campaigns":
+            return self._json(read_campaigns(REPO))
+        if path == "/api/campaign/export":
+            try:
+                export = read_export(REPO, (q.get('campaign') or [''])[0], (q.get('file') or [''])[0])
+            except (OSError, ValueError, TypeError) as exc:
+                return self._json({'error': str(exc)}, 404)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/octet-stream')
+            self.send_header('Content-Length', str(len(export['payload'])))
+            self.send_header('Content-Disposition', 'attachment; filename="%s"' % export['name'])
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            self.wfile.write(export['payload'])
+            return
         if path == "/api/skills":
             return self._json({"skills": list_skills()})
         if path == "/api/defaults":
@@ -398,9 +424,9 @@ def _which(name):
 
 def _defaults():
     return {
-        "seed": "client/poc_kl/fp8_blockscale_gemm/shader/fp8gemm_blockscase_32mx1_32nx4.s",
-        "client": "poc_kl/fp8_blockscale_gemm",
-        "params": "m=2560 n=2560 k=256",
+        "seed": "",
+        "client": "aiter/hsa/gfx942",
+        "params": "",
         "region": "loop",
         "rounds": 5,
         "loop": 20,

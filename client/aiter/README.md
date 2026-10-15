@@ -12,6 +12,11 @@
 仅替换 symbol 并不能给不同算子自动生成参数和正确性参考。
 默认为 M=N=256、K=1024；正式性能测量应指定实际 workload 的 shape。
 
+按 aiter 实际配置选择调优尺寸时，使用 [dispatch CSV → workload → .co 工作流](docs/dispatch-workloads.md)。
+`dispatch.py plan` 生成配置快照、正反向索引和逐 workload manifest；`lookup` 反查一个 `.co` 的全部尺寸；
+`assess` 汇总固定候选的跨尺寸对比。规划仅用 CPU，派发、数值和性能必须在目标机器继续验证。
+操作步骤由 [aiter skill](../../knowledge/skills/aiter-gfx942-validation/SKILL.md) 指导，解析和判定由固定代码实现。
+
 ## 在目标机器准备
 
 已完成一个 gfx942 小尺寸算子的真机验证，范围见 [实测记录](docs/validated-runs/20261014.md)。

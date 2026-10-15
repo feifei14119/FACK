@@ -12,7 +12,7 @@ FACK：面向 gfx942 的 AMDGPU 汇编指令调度调优框架。
 | skill | 什么时候读 |
 |---|---|
 | [`mfma-interleave-gfx942`](knowledge/skills/mfma-interleave-gfx942/SKILL.md) | gfx942 MFMA 穿插、实测窗口查询与汇编覆盖检查；直接引用 submodule 已有导出，模型只提供估计 |
-| [`aiter-gfx942-validation`](knowledge/skills/aiter-gfx942-validation/SKILL.md) | aiter 远端/Docker 环境准备、GPU 选择、seed 验证，以及调优后的单算子 op_test 对比 |
+| [`aiter-gfx942-validation`](knowledge/skills/aiter-gfx942-validation/SKILL.md) | aiter 远端/Docker 环境、GPU 选择、CSV workload/.co 正反查、派发与 seed 验证、op_test 和跨尺寸对比 |
 
 ## 自学成果依赖
 

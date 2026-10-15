@@ -12,6 +12,20 @@ import sys
 import traceback
 
 
+def configure_dispatch(request, props):
+    """Set only the declared config override, before aiter can cache dispatch."""
+    binding = request.get("dispatch")
+    if binding is None:
+        return
+    from client.aiter.dispatch import FAMILIES
+    if props.multi_processor_count != binding["cu_num"]:
+        raise ValueError("device CU count differs from frozen CSV workload")
+    snapshot = Path(request["dispatch_snapshot"]).resolve()
+    if digest(snapshot) != binding["snapshot_sha256"]:
+        raise ValueError("runtime dispatch snapshot changed")
+    os.environ[FAMILIES[binding["family"]][1]] = str(snapshot)
+
+
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -38,6 +52,13 @@ def validate_driver(driver, request):
 def execute(request, report):
     import torch
 
+    binding = request.get("dispatch") or {}
+    reference = binding.get("reference") or {}
+    report["workload"] = {"id": binding.get("workload_id"), "inputs": request["inputs"],
+        "csv": [dict(reference["source"], line=reference["line"])] if reference.get("source") else [],
+        "selection": "dispatch_csv" if binding else "explicit_manifest", "cu_num": binding.get("cu_num"),
+        "entrypoint": binding.get("entrypoint"), "dispatch_status": "not_checked"}
+
     if not torch.version.hip or not torch.cuda.is_available():
         raise RuntimeError("a ROCm PyTorch GPU environment is required")
     torch.cuda.set_device(0)  # select through HIP_VISIBLE_DEVICES/ROCR_VISIBLE_DEVICES
@@ -49,6 +70,10 @@ def execute(request, report):
         raise RuntimeError("device {} differs from requested {}".format(arch, request["arch"]))
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.set_grad_enabled(False)
+
+    if "dispatch" in request:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+        configure_dispatch(request, props)
 
     upstream = Path(request["upstream"]).resolve()
     sys.path.insert(0, str(upstream))
@@ -72,6 +97,17 @@ def execute(request, report):
     spec = importlib.util.spec_from_file_location("aiter_tuning_driver", request["driver"])
     driver = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(driver)
+    if "dispatch" in request:
+        hook = getattr(driver, "check_dispatch", None)
+        if not callable(hook):
+            raise ValueError("dispatch-bound workload requires a check_dispatch hook")
+        checked = hook(dict(request["inputs"]), request["symbol"], request["seed"], request["dispatch"])
+        report["dispatch_check"] = checked
+        if not isinstance(checked, dict) or checked.get("correct") is not True:
+            raise ValueError("normal-entrypoint dispatch check failed")
+        if not loader_observed(request):
+            raise ValueError("normal entrypoint did not load the selected overlay .co")
+        report["workload"]["dispatch_status"] = "verified"
     checks = []
     report["checks"] = checks
 
@@ -153,6 +189,8 @@ def execute(request, report):
     report.update(correct=True, time_us=statistics.median(timings), samples_us=timings,
                   flops=flops, timing="HIP graph replay event median per run()",
                   validation="two input seeds plus post-timing full-output comparison")
+    if "dispatch" in request and digest(request["dispatch_snapshot"]) != request["dispatch"]["snapshot_sha256"]:
+        raise ValueError("runtime config changed during evaluation")
 
 
 def main():

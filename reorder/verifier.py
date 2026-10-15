@@ -133,8 +133,9 @@ class Verifier:
                 entry.instr(ln, board)
 
         # Walk once; each loop body gets a SECOND pass (seeded from the running
-        # state, with previous-iteration producers live) and only that pass
-        # records -- this exposes loop-carried under-synchronization.
+        # state, with previous-iteration producers live). Targets which seed
+        # entry loads check both passes: entry and loop issue orders may differ,
+        # so a safe steady-state wait can still under-sync the first iteration.
         i, n = 0, len(items)
         while i < n:
             span = next(((sp, ep) for (sp, ep) in loop_spans if sp <= i <= ep), None)
@@ -144,7 +145,7 @@ class Verifier:
                 continue
             sp, ep = span
             body = items[sp:ep + 1]
-            walk(body, record=False)
+            walk(body, record=getattr(cm, "seed_loop_entry", False))
             walk(body, record=True)
             i = ep + 1
         return violations
@@ -218,7 +219,7 @@ class Verifier:
             body = items[sp:ep + 1]
             first = contract and board._contract_first is not None
             board.first_iteration(first)
-            walk(body, record=first)
+            walk(body, record=first or getattr(cm, "seed_loop_entry", False))
             board.first_iteration(False)
             # rank-N requirements are only observable after N body instances
             for _ in range(getattr(lds_model, "depth", 1) - 2 if contract else 0):

@@ -1,0 +1,23 @@
+{
+  "upstream_commit": "2abf8aaa44f9d81c88d6153024b21e6931c7f906",
+  "export": "git show <fixed-commit>:<path>; byte-for-byte output",
+  "required_for": "portable gfx942 MLA JIT full schema with sparse upstream checkout",
+  "files": {
+    "hsa/gfx1250/mla/mla_asm.csv": {
+      "sha256": "eb9435307ce842470ae09cde4259c3b498cfbbd5ca1ce04d0c46b9f632968412",
+      "size": 1638
+    },
+    "hsa/gfx1250/mla_dsl/mla_dsl.csv": {
+      "sha256": "2ba253bd337c566eda3d1ca21395e84f1549e0be62bb220db13952a26fd4d89e",
+      "size": 1969
+    },
+    "hsa/gfx942/mla/mla_asm.csv": {
+      "sha256": "827f805442143024bdb166662d62304308b50b569f3630fb141ad3338d7c72af",
+      "size": 3083
+    },
+    "hsa/gfx950/mla/mla_asm.csv": {
+      "sha256": "e72f763b7f0916ddfde34e3c4487dda2f214b36350f39cf7ad35258b73737d42",
+      "size": 9680
+    }
+  }
+}

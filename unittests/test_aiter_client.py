@@ -70,11 +70,13 @@ class TestAiterProtocol(unittest.TestCase):
             ctx = SimpleNamespace(out_dir=str(root / "out"))
             ev = adapter.AiterEvaluator.__new__(adapter.AiterEvaluator)
             ev.ctx = ctx
-            ev.opts = SimpleNamespace(timeout=10, seed=123, warmup=1, iters=2, samples=2, python="python3")
+            ev.opts = SimpleNamespace(timeout=10, seed=123, warmup=1, iters=2, samples=2, python="python3", output_dir=None)
             ev.config = {"arch": "gfx942", "symbol": "selected", "co": "selected.co", "inputs": {}}
             ev.driver = root / "driver.py"
 
-            for mode in ("pass", "missing_load", "numerical_fail", "artifact_change", "crash", "bad_time"):
+            for mode in ("pass", "missing_load", "numerical_fail", "numerical_fail_required_validation",
+                         "missing_required_validation", "artifact_change", "crash", "bad_time"):
+                ev.config['validation_hook'] = mode in ('numerical_fail_required_validation','missing_required_validation')
                 def fake_process(argv, log, timeout, env=None, cwd=None):
                     if "request.json" in str(argv):
                         cache = Path(env["AITER_ROOT_DIR"])
@@ -86,7 +88,7 @@ class TestAiterProtocol(unittest.TestCase):
                             raise RuntimeError("runner failed")
                         report = dict(schema_version=1, arch="gfx942", symbol="selected",
                                       co_sha256=request["co_sha256"], loader_observed=mode != "missing_load",
-                                      correct=mode != "numerical_fail", time_us=2.0, flops=100.0)
+                                      correct=not mode.startswith("numerical_fail"), time_us=2.0, flops=100.0)
                         if mode == "bad_time":
                             report["time_us"] = -1
                         Path(argv[-1]).write_text(json.dumps(report))
@@ -105,7 +107,7 @@ class TestAiterProtocol(unittest.TestCase):
                     self.assertIs(result.correct, True)
                     self.assertEqual(result.time_us, 2.0)
                 else:
-                    self.assertIs(result.correct, False if mode == "numerical_fail" else None)
+                    self.assertIs(result.correct, False if mode.startswith("numerical_fail") else None)
                     self.assertIsNone(result.time_us)
                     self.assertIsNone(result.tflops)
 

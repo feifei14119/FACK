@@ -6,6 +6,7 @@ import re
 import statistics
 
 from tools.tune_run_report import snapshot_report
+from webUI.workloads import extract_workload, from_manifest, read_json
 
 
 def number(value):
@@ -54,7 +55,8 @@ def base(path, repo, kind, data, client_name):
     return {"id": str(path.relative_to(repo)), "source": str(path.relative_to(repo)),
             "title": data.get("run_id") or path.parent.name, "kind": kind,
             "target": target(data, client_name), "status": "not_finalized", "selected": None,
-            "candidate": None, "metrics": [], "notes": [], "updated": path.stat().st_mtime}
+            "candidate": None, "metrics": [], "notes": [], "updated": path.stat().st_mtime,
+            "workload": extract_workload(data, repo)}
 
 
 def run_result(directory, repo, client_name):
@@ -140,6 +142,27 @@ def historical_result(path, repo, data, client_name):
     return row
 
 
+def validation_result(path, repo, data, client_name):
+    request = read_json(path.with_name("request.json"), repo)
+    runner = (data.get("detail") or {}).get("runner") or {}
+    if runner and (runner.get("co_sha256") != request.get("co_sha256") or runner.get("symbol") != request.get("symbol")):
+        raise ValueError("validation report/request identity mismatch")
+    row = base(path, repo, "validation", data, client_name)
+    row["target"] = {"client": client_name + "/hsa/" + request["arch"], "gfx": request["arch"],
+                     "co": request["co"], "symbol": request["symbol"]}
+    row["workload"] = from_manifest(request, repo)
+    row["workload"]["dispatch_status"] = "verified" if runner.get("dispatch_check", {}).get("correct") is True else "not_checked"
+    valid = data.get("compiled") is True and data.get("correct") is True and (
+        data.get("detail", {}).get("build_evidence", {}).get("status") == "consistent")
+    row["status"] = "validation_passed" if valid else "validation_failed"
+    row["notes"].append("单次 client 验证；不是原始/候选独立配对收益，也不代表完成调优。")
+    if valid and number(data.get("time_us")):
+        row["measurement"] = {"time_us": data["time_us"]}
+    if data.get("detail", {}).get("error"):
+        row["notes"].append(str(data["detail"]["error"]))
+    return row
+
+
 def legacy_result(path, repo, data, client_name):
     row = base(path, repo, "screening", data, client_name)
     row.update(title=path.name, status="screening_only")
@@ -147,6 +170,50 @@ def legacy_result(path, repo, data, client_name):
     row["screening"] = {"best": best.get("tflops"), "baseline": best.get("baseline_tflops")}
     row["notes"].append("旧版筛选汇总，没有最终独立验证；缺失的 gfx/.co 不从当前配置猜测。")
     return row
+
+
+def campaign_results(repo):
+    """Present synchronized measurements with their recorded workload only."""
+    from webUI.campaigns import read_campaigns
+    synced = read_campaigns(repo)
+    rows = []
+    for campaign in synced["campaigns"]:
+        for kernel in campaign["kernels"]:
+            evidence = kernel.get("metrics") or {}
+            if not evidence:
+                continue
+            match = re.search(r"gfx[0-9a-f]+", campaign.get("campaign_id", ""))
+            arch = campaign.get("arch") or (match[0] if match else None)
+            final = evidence.get("final") or {}
+            decision = evidence.get("campaign_decision") or final.get("status") or "not_finalized"
+            if decision in ("confirmed_gain", "candidate_adopted", "candidate_selected"):
+                decision = "final_recommended" if evidence.get("valid_for_adoption") is True else "not_finalized"
+            row = {"id": campaign["campaign_id"] + "/" + (kernel["workload"].get("id") or kernel.get("run_id") or kernel["co"]),
+                "source": campaign["snapshot_path"], "title": kernel.get("run_id") or kernel["co"],
+                "kind": "campaign", "target": {"client": "aiter/hsa/" + arch if arch else "aiter",
+                    "gfx": arch, "co": kernel["co"], "symbol": kernel.get("symbol")},
+                "workload": kernel["workload"], "status": decision,
+                "selected": final.get("selected_id"), "metrics": [], "notes": [
+                    "远端任务快照：" + campaign["campaign_id"]] + ([kernel["reason"]] if kernel.get("reason") else []),
+                "artifacts": evidence.get("selected_artifact") or kernel.get("artifacts"),
+                "updated": Path(campaign["snapshot_path"]).stat().st_mtime}
+            if evidence.get("valid_for_adoption") is False:
+                row["status"] = "invalid"
+                row["notes"].append("候选验证失败；历史配对数值不计入有效收益。")
+            else:
+                for paired in evidence.get("paired_results", []):
+                    if paired.get("stage") != "final" or not (paired.get("scope") == "independent_paired" or paired.get("independent") is True):
+                        continue
+                    analysis = {"median_ratio": 1 + paired["gain_pct"] / 100 if number(paired.get("gain_pct")) else None,
+                        "lower_ratio_bound": paired.get("ratio_lower_bound"), "upper_ratio_bound": paired.get("ratio_upper_bound"),
+                        "verdict": paired.get("verdict"), "pairs": paired.get("pairs")}
+                    row["metrics"].append(metric("最终配对 · " + paired.get("method", "未记录"),
+                        paired.get("reference_median_us"), paired.get("candidate_median_us"), analysis))
+            screen = evidence.get("original_screen") or {}
+            if screen.get("correct") is True:
+                row["screening"] = {"baseline": screen.get("tflops"), "baseline_time_us": screen.get("time_us")}
+            rows.append(row)
+    return {"results": rows, "errors": synced["errors"]}
 
 
 def read_results(repo, client_names):
@@ -171,6 +238,8 @@ def read_results(repo, client_names):
                 row = legacy_result(path, repo, data, client_name)
             elif kind == "comparison" or data.get("purpose") == "portable_workflow_same_seed_comparison":
                 row = paired_result(path, repo, data, client_name, archived=kind == "archive")
+            elif kind == "validation":
+                row = validation_result(path, repo, data, client_name)
             elif kind == "archive" and "comparison" in data:
                 row = historical_result(path, repo, data, client_name)
             else:
@@ -183,6 +252,7 @@ def read_results(repo, client_names):
         root = repo / "client" / name
         for pattern, kind in (("tune_out/runs/*/state.json", "run"),
                               ("tune_out/comparisons/*/comparison.json", "comparison"),
+                              ("tune_out/eval-*/evaluation.json", "validation"),
                               ("tune_out/tune_result/*.summary.json", "screening"),
                               ("docs/validated-runs/*.json", "archive")):
             for path in sorted(root.glob(pattern)):

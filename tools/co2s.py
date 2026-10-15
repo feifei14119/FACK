@@ -143,7 +143,41 @@ def kernel_descriptor(mcpu, co, kd):
         last = 102 if "xnack-" in features else 98
         lines = [".amdhsa_next_free_sgpr {}".format(last) if l == ".amdhsa_next_free_sgpr 104" else l
                  for l in lines]
+        # Some upstream objects encode the 112-SGPR allocation granule even
+        # though the highest explicit register is below 102. With XNACK on/any,
+        # next_free=102 plus the XNACK special-register reservation encodes 112.
+        # Keep the original metadata and require byte-identical KD verification.
+        if "xnack-" not in features:
+            lines = [".amdhsa_next_free_sgpr 102" if l == ".amdhsa_next_free_sgpr 112" else l
+                     for l in lines]
     return lines
+
+
+def normalize_88_sgpr_descriptor(mcpu, lines, insts, metadata):
+    """Invert the observed gfx942 88-SGPR/XNACK decode only with a proven fit.
+
+    LLVM prints an allocation ceiling, which is not the source's explicit
+    register footprint. Reusing it as next_free can add another allocation
+    granule when the assembler accounts for special SGPRs. Use the declared
+    metadata footprint only when it covers every decoded explicit operand.
+    Do not assume a fixed reservation count: the subsequent complete
+    descriptor comparison must prove that the original granule is retained.
+    """
+    gfx, *features = mcpu.split(":")
+    required = {".amdhsa_next_free_sgpr 88", ".amdhsa_reserve_xnack_mask 1",
+                ".amdhsa_reserve_vcc 0"}
+    if gfx != "gfx942" or "xnack-" in features or not required.issubset(lines):
+        return lines
+    counts = [int(n) for n in re.findall(r"^\s*\.sgpr_count:\s*(\d+)\s*$", metadata, re.M)]
+    if not counts or max(counts) >= 88 or not insts or any("raw" in it for it in insts):
+        return lines
+    registers = [int(n) for it in insts
+                 for match in re.finditer(r"\bs(\d+)\b|\bs\[(\d+):(\d+)\]", it["orig"])
+                 for n in match.groups() if n is not None]
+    if not registers or max(registers) >= max(counts):
+        return lines
+    return [".amdhsa_next_free_sgpr {}".format(max(counts)) if line == ".amdhsa_next_free_sgpr 88" else line
+            for line in lines]
 
 
 def _objdump(mcpu, co, start=None):
@@ -344,6 +378,8 @@ def main(disassembler=disassemble):
             rawify(it, it["raw_reason"])
         elif "<unknown>" in it["orig"] or it["orig"].startswith(";"):
             rawify(it, "undecodable")
+    kd_blocks = {kd: normalize_88_sgpr_descriptor(mcpu, block, insts, meta)
+                 for kd, block in kd_blocks.items()}
 
     out = args.out or os.path.splitext(args.co)[0] + ".s"
     line_map = write_asm(out, args.co, mcpu, target, cov, funcs, kd_blocks, meta, insts, labels, args.no_addr)

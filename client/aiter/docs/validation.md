@@ -3,6 +3,9 @@
 命令从目标机器的 FACK 仓库根执行。使用宿主机 Python 3.8 或更新版本；不要假定 `python3` 已满足最低版本。
 容器使用自己的 Python。所有产物位于 `client/aiter/tune_out/`，新 clone 不需要历史产物。
 
+MLA stage1 的明确分页、物理 KV 存储和单目标 op_test 步骤见
+[MLA 专用验证](mla-stage1-validation.md)。
+
 ```bash
 AIT_HOST_PY=python3
 if command -v python3.8 >/dev/null 2>&1; then AIT_HOST_PY=python3.8; fi
@@ -81,6 +84,9 @@ docker exec "$AIT_CONTAINER" /opt/venv/bin/python3 tools/eval_candidate.py \
 
 ## 4. 运行指定 .co 对应的上游 op_test
 
+下面是默认 FP8 blockscale 示例。按 dispatch CSV 生成的任务请使用其原 manifest，已经开启相应 GEMM
+op_test 和正常入口选择检查；不要替换成这里的默认 manifest。完整流程见 [按 CSV 选择 workload](dispatch-workloads.md)。
+
 ```bash
 docker exec "$AIT_CONTAINER" /opt/venv/bin/python3 tools/eval_candidate.py \
   "client/aiter/tune_out/$AIT_RUN/seed.s" --client aiter/hsa/gfx942 -- \
@@ -93,9 +99,12 @@ docker exec "$AIT_CONTAINER" /opt/venv/bin/python3 tools/eval_candidate.py \
 manifest 显式启用 `driver.validate(inputs, symbol, seed)`，每次 evaluator 在两组基本数值检查之后、
 HIP graph 预热和计时之前调用一次。结果写入该次 `eval-*/result.json` 的 `op_test`，错误会让 evaluator/CLI 失败。
 
-当前 adapter 只适用于 `fp8gemm_bf16_blockscale_BpreShuffle_32x128.co`、splitK=1。
+当前 blockscale adapter 支持 gfx942 catalog 的 `fp8gemm_bf16_blockscale_BpreShuffle_<M>x128.co`，
+其中 tile M 为 32、48、64、80、96、128，固定 splitK=1。默认示例 manifest 仍选择 32x128。
 它调用固定上游 `op_tests/test_gemm_a8w8_blockscale.py` 的 `test_gemm`，覆盖 constant/constant 与 uniform/auto，
 包含 CK、strided CK、ASM、Triton 完整输出对比；不执行文件末尾其他 shape 的 split-K 扫描。
+CK 比较显式调用固定 SHA 审核的 C++ 默认分支（`kernelName=""`），避免合并的调优 CSV 指向未编入
+registry 的内核；该选择及实现 SHA 写入 `op_test.ck_dispatch`。不改上游代码或 CSV，目标 ASM 仍固定到 manifest symbol。
 
 这是版本限定的适配：先核验测试文件 SHA，再通过 AST 截取 CLI 前的定义。上游 `run_asm` 当前不透传
 `kernel_name`，adapter 临时绑定所选 symbol/splitK，并在失败时恢复调用；不得用自动选核代替目标候选。

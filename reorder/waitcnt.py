@@ -719,6 +719,28 @@ def _entry_board(items, end_line: int, target, cm, **kw) -> "_Scoreboard":
     return board
 
 
+def _loop_prefix_items(program, items, region, target):
+    """Current function's entry through this loop, retaining code-item positions.
+
+    LDS mappings must cover the entry loads as well as the edited body. Do not
+    include another kernel's loads or the unedited suffix when resolving their
+    bands. Kernel descriptors and ELF function declarations identify entries;
+    without either, the input is treated as one assembly function, as before.
+    """
+    symbols = set(getattr(target, "kernel_symbols", lambda p: [])(program))
+    for ln in program.lines:
+        if ln.directive == ".type":
+            body = ln.raw.split(".type", 1)[1].split(",", 1)
+            typ = body[1].strip().split() if len(body) == 2 else []
+            if typ and typ[0] in ("@function", "%function"):
+                symbols.add(body[0].strip())
+    starts = [it.line.idx for it in items
+              if it.line.kind is LineKind.LABEL and it.line.label in symbols
+              and it.line.idx <= region.line_start]
+    start = max(starts) if starts else min((it.line.idx for it in items), default=0)
+    return [it for it in items if start <= it.line.idx <= region.line_end]
+
+
 def _snapshot(board: "_Scoreboard") -> "_Scoreboard":
     """Independent copy of a scoreboard; the read-only LDS model / contracts
     are shared, not copied."""
@@ -872,18 +894,23 @@ def recompute(program: Program, target, region=None,
 
     # LDS round-trip slot model (M5): supplied by the Target when it can resolve
     # the multi-buffer structure; reorder/ stays architecture-agnostic. Fold
-    # over the whole .text prefix (the LDS base chain lives in the prologue) but
-    # only record loads/reads in scope.
+    # over the prefix (the LDS base chain lives in the prologue). A seeded loop
+    # also records entry loads; other paths retain their existing scope.
+    seeded = bool(loop_aware and region is not None
+                  and getattr(cm, "seed_loop_entry", False))
+    entry_items = _loop_prefix_items(program, items, region, target) if seeded else items
     lds_model = None
     if lds_roundtrip and hasattr(target, "lds_roundtrip_model"):
-        text_instr = [it.line for it in items if it.line.kind is LineKind.INSTR]
-        lds_model = target.lds_roundtrip_model(text_instr, scope_idxs=scope)
+        text_instr = [it.line for it in entry_items if it.line.kind is LineKind.INSTR]
+        # _entry_board must be able to assign the prologue's in-flight fills to
+        # their LDS bands; a body-only mapping silently loses those producers.
+        model_scope = {it.line.idx for it in entry_items} if seeded else scope
+        lds_model = target.lds_roundtrip_model(text_instr, scope_idxs=model_scope)
 
     if loop_aware:
         kw = dict(lds_roundtrip=lds_roundtrip, lds_model=lds_model,
                   barrier_band_scoped=barrier_band_scoped)
-        seeded = region is not None and getattr(cm, "seed_loop_entry", False)
-        entry = _entry_board(items, region.line_start, target, cm, **kw) if seeded else None
+        entry = _entry_board(entry_items, region.line_start, target, cm, **kw) if seeded else None
         if region is not None and instr_lines:
             seed_entry = (_snapshot(entry) if entry is not None
                           else _Scoreboard(cm.names, cm=cm, **kw))

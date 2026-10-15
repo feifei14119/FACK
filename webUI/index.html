@@ -10,7 +10,7 @@
 <body class="console-body">
   <header class="topbar">
     <div class="topbar-left">
-      <div class="brand-mark">tf</div>
+      <div class="brand-mark">F</div>
       <div>
         <div class="topbar-title">FACK 控制台</div>
         <div class="topbar-sub">指令级 AI 辅助优化引擎 · 交互式操作面板</div>
@@ -27,66 +27,109 @@
     <div class="panel-left">
       <div class="tabs" id="tabs">
         <button class="tab active" data-tab="tune">调优</button>
-        <button class="tab" data-tab="learn">学习 / 挖掘</button>
+        <button class="tab" data-tab="workloads">CSV 工作负载</button>
+        <button class="tab" data-tab="learn">技能 / 静态挖掘</button>
         <button class="tab" data-tab="verify">测试 / 验证</button>
         <button class="tab" data-tab="results">结果 / 技能</button>
+        <button class="tab" data-tab="campaigns">远端调优进度</button>
       </div>
 
       <!-- 调优 -->
       <section class="tabpane active" id="pane-tune">
         <div class="card">
-          <h3>自定义调优 <span class="need">需 GPU + API key</span></h3>
-          <p class="desc">用 <code>tune.mjs</code> 起本地 Cursor agent，observe→propose→eval 真机闭环把 seed kernel 调快。参数在 <code>--</code> 之后原样透传给被测程序。</p>
-          <div class="form" id="tuneForm">
-            <label>seed 路径（.s 汇编）
-              <input name="seed" data-def="seed" />
-            </label>
-            <label>调优 client（--client，client/ 下的路径）
-              <input name="client" data-def="client" />
-            </label>
-            <label>透传参数（-- 之后，如 m=2560 n=2560 k=256）
-              <input name="params" data-def="params" />
-            </label>
-            <div class="form-row">
-              <label>区域 region
-                <select name="region">
-                  <option value="loop">loop（主循环，默认）</option>
-                  <option value="prologue">prologue</option>
-                  <option value="epilogue">epilogue</option>
-                  <option value="inter">inter</option>
-                  <option value="all">all / auto（跨区）</option>
-                </select>
-              </label>
-              <label>轮数 rounds
-                <input name="rounds" type="number" min="1" max="100" value="5" />
-              </label>
-              <label>测量循环 loop
-                <input name="loop" type="number" min="1" max="1000" value="20" />
-              </label>
-            </div>
-            <label>模型 model（可空，默认 auto）
-              <input name="model" placeholder="auto 或 claude-opus-5-5,effort=medium" />
-            </label>
-            <label>CURSOR_API_KEY（可空，仅本次运行用，不保存）
-              <input name="apikey" type="password" placeholder="留空则用 env / cursor.config.json" />
-            </label>
-            <label class="check"><input type="checkbox" name="transcript" /> 保存完整 transcript（提示词+LLM输出）</label>
-            <button class="btn primary" data-action="tune">▶ 开始调优</button>
+          <h3>1. 选择 CSV 工作负载</h3>
+          <p class="desc">按配置选择 .co 和完整测试参数。同一 .co 的不同尺寸分别创建任务。操作在 Web UI 所在的环境执行；远端任务通过本机快照展示。</p>
+          <div class="form">
+            <label>调优计划<select id="planSelect"><option value="">加载中…</option></select></label>
+            <label>可验证 workload<select id="taskSelect"><option value="">先选择计划</option></select></label>
           </div>
+          <div id="selectedWorkload" class="selected-workload" aria-live="polite"></div>
+          <button class="btn tiny" data-goto="workloads">查看全部尺寸与待适配原因 →</button>
         </div>
-
         <div class="card">
-          <h3>一键脚本（用脚本内 CONFIG 块）</h3>
-          <p class="desc">直接运行仓库入口脚本，参数取脚本顶部 CONFIG（不使用上面的表单）。</p>
-          <div class="btn-row">
-            <button class="btn" data-action="tune_quick">▶ 快跑 tune_quick.sh</button>
-            <button class="btn" data-action="tune_tail">▶ 尾段 tune_prologue_epilogue.sh</button>
+          <h3>2. 导出 seed、验证原始代码、创建调优任务</h3>
+          <p class="desc">原始数值和正常入口派发验证通过后再调优。MNK、splitK、layout 和 manifest 使用所选 workload，不能在这里改写。</p>
+          <div class="form" id="taskForm">
+            <div class="form-row">
+              <label>ROCm Python<input name="python" value="python3" placeholder="/opt/venv/bin/python3" /></label>
+              <label>单卡 GPU 序号 / UUID<input name="gpu" placeholder="已在容器中限制可见 GPU 时可留空" /></label>
+              <label>评测预算<input name="eval_calls" type="number" min="1" value="48" /></label>
+            </div>
+            <label>新 run ID（留空按 workload ID 生成）<input name="run_id" /></label>
+            <label>配对策略 JSON（需 confirm/final 时填写）<input name="policy" placeholder="已预先约定的比较策略文件" /></label>
+            <details><summary>测量设置</summary><div class="form-row">
+              <label>预热次数<input name="warmup" type="number" min="1" value="20" /></label>
+              <label>图内迭代<input name="iters" type="number" min="1" value="100" /></label>
+              <label>计时样本<input name="samples" type="number" min="1" value="7" /></label>
+            </div></details>
+            <div class="btn-row">
+              <button class="btn" data-action="dispatch_prepare">导出原始 seed</button>
+              <button class="btn" data-action="dispatch_validate">验证原始 / op_test</button>
+              <button class="btn primary" data-action="dispatch_init">创建调优任务</button>
+            </div>
           </div>
         </div>
+        <div class="card">
+          <h3>3. 执行持久化调优步骤</h3>
+          <p class="desc">创建任务只冻结输入。先 eval original，然后 observe / suggest / prepare / eval，最后 confirm / final。agent 按 aiter 和 MFMA skill 提出候选。</p>
+          <div class="form" id="runForm">
+            <label>run 目录<input name="run" id="runDirectory" placeholder="client/aiter/tune_out/runs/…" /></label>
+            <div class="form-row">
+              <label>步骤<select name="step"><option>status</option><option>eval</option><option>observe</option><option>suggest</option><option>prepare</option><option>confirm</option><option>final</option></select></label>
+              <label>候选 ID（eval / confirm）<input name="candidate_id" value="original" /></label>
+            </div>
+            <details><summary>prepare 候选参数</summary><div class="form">
+              <label>Observation ID<input name="observation" /></label><label>Base SHA256<input name="base_sha256" /></label>
+              <label>候选操作 JSON<input name="spec_file" /></label>
+            </div></details>
+            <button class="btn primary" data-action="run_step">执行所选步骤</button>
+          </div>
+        </div>
+        <details class="card"><summary>高级：SDK agent 调优入口</summary>
+          <p class="desc">使用同一 workload manifest 启动本地 Cursor agent。结果属于 SDK 筛选流程，仍需在验证页执行独立配对比较。</p>
+          <div class="form" id="tuneForm">
+            <label>seed .s<input name="seed" data-def="seed" /></label>
+            <label>Client<input name="client" data-def="client" readonly /></label>
+            <label>冻结的 client 参数<input name="params" readonly /></label>
+            <div class="form-row"><label>区域<select name="region"><option>loop</option><option>prologue</option><option>epilogue</option><option>all</option></select></label>
+              <label>轮数<input name="rounds" type="number" min="1" max="100" value="5" /></label>
+              <label>测量循环<input name="loop" type="number" min="1" value="20" /></label></div>
+            <label>模型<input name="model" placeholder="auto" /></label>
+            <label>CURSOR_API_KEY（仅本次使用）<input name="apikey" type="password" /></label>
+            <label class="check"><input name="transcript" type="checkbox" /> 保存 transcript</label>
+            <button class="btn" data-action="tune">启动 SDK agent</button>
+          </div>
+        </details>
+      </section>
+
+      <section class="tabpane" id="pane-workloads">
+        <div class="card">
+          <div class="card-head-row"><h3>CSV → workload → .co</h3><button class="btn tiny" id="refreshWorkloads">刷新</button></div>
+          <p class="desc">显示所选计划的全部配置引用。待原始验证不代表已调优；其他 backend、冲突和待适配记录保留。筛选和分页不改变任务覆盖范围。</p>
+          <div class="form results-filters">
+            <label>计划<select id="browsePlan"></select></label>
+            <label>状态<select id="workloadStatus"><option value="">全部状态</option><option value="ready_for_validation">待原始验证</option><option value="unsupported_adapter">待适配 / 调查</option><option value="other_backend">其他 backend</option><option value="unmapped">未匹配 HSA</option><option value="config_conflict">配置冲突</option><option value="ambiguous_catalog">目录匹配不唯一</option><option value="missing_co">缺少 .co</option></select></label>
+            <label>查找 .co / 尺寸 / CSV / 行号<input id="workloadQuery" type="search" placeholder="192、1536、a8w8、文件名或行号" /></label>
+          </div>
+          <p id="workloadCounts" class="desc" aria-live="polite"></p>
+          <div id="workloadErrors" role="status"></div>
+          <div id="workloadsBox"></div>
+          <div class="btn-row"><button class="btn tiny" id="workloadPrev">上一页</button><span id="workloadPage"></span><button class="btn tiny" id="workloadNext">下一页</button></div>
+        </div>
+        <details class="card"><summary>生成新计划（仅 CPU，不运行调优）</summary>
+          <div class="form" id="planForm">
+            <label>目标 GPU 实际 CU 数<input name="cu" type="number" min="1" placeholder="从目标设备读取，例如 80 或 304" /></label>
+            <label>Family<select name="family"><option value="">全部（GEMM → MoE）</option><option value="bf16">BF16 GEMM</option><option value="a8w8">A8W8 preshuffle</option><option value="blockscale">Blockscale</option><option value="blockscale_preshuffle">Blockscale preshuffle</option><option value="moe">MoE</option></select></label>
+            <label>新计划目录<input name="out" placeholder="client/aiter/tune_out/dispatch-new-run" /></label>
+            <label>显式 CSV（可选，选定一个 family，每行一个文件）<textarea name="config" rows="3" placeholder="留空使用 AITER_CONFIG_* 或默认与 model 配置"></textarea></label>
+            <button class="btn primary" data-action="dispatch_plan">生成计划</button>
+          </div>
+        </details>
       </section>
 
       <!-- 学习 -->
       <section class="tabpane" id="pane-learn">
+        <div class="card"><h3>默认复用已审核技能</h3><p class="desc">普通调优直接读取 aiter-gfx942-validation 和 selfstudy/gfx942 已导出的 mfma-interleave-gfx942。缺少导出时初始化固定 submodule；不自动执行自学、探针或 pipeline。</p><a href="help.html#dispatch">查看当前 aiter 工作流 →</a></div>
         <div class="card">
           <h3>静态挖掘（Layer 1）<span class="ok">无需 GPU</span></h3>
           <p class="desc">从 gold（人工调好）kernel 语料静态挖出按区域的调优先验，产物一律 candidate。</p>
@@ -98,14 +141,6 @@
               <input name="out" data-def="out" />
             </label>
             <button class="btn primary" data-action="mine">⛏ 开始学习（挖掘）</button>
-          </div>
-        </div>
-
-        <div class="card">
-          <h3>完整挖掘流水线</h3>
-          <p class="desc"><code>mine_skills.sh</code>：清空旧 skill → Layer 1 静态挖掘 → Layer 2 离线 AI 归纳（需 Node + API key，否则自动跳过）。</p>
-          <div class="btn-row">
-            <button class="btn" data-action="mine_full">⛏ 运行 mine_skills.sh (L1+L2)</button>
           </div>
         </div>
 
@@ -124,32 +159,33 @@
 
       <!-- 验证 -->
       <section class="tabpane" id="pane-verify">
-        <div class="card">
-          <h3>单元测试 <span class="ok">无需 GPU</span></h3>
-          <p class="desc">标准库 unittest，零安装。</p>
-          <div class="btn-row">
-            <button class="btn primary" data-action="test">✓ 运行全部单元测试</button>
+        <div class="card"><h3>4. 固定候选，单尺寸验证与配对比较</h3>
+          <p class="desc">沿用调优页选定的 workload 和运行环境。每次评测检查正常入口派发、完整输出和 op_test，HIP graph 与 op_test 分开统计。</p>
+          <div id="verifyWorkload" aria-live="polite"></div><button class="btn tiny" data-goto="tune">选择 workload / 运行环境 →</button>
+          <div class="form" id="compareForm">
+            <label>固定候选 .s<input name="candidate" placeholder="client/aiter/tune_out/…/candidate.s" /></label>
+            <div class="form-row"><label>配对数（偶数）<input name="pairs" type="number" min="6" step="2" value="6" /></label>
+              <label>最低收益（比例）<input name="min_gain" type="number" min="0" step="0.01" value="0.01" /></label>
+              <label>Alpha<input name="alpha" type="number" min="0.001" max="0.49" step="0.01" value="0.05" /></label></div>
+            <div class="btn-row"><button class="btn" data-action="dispatch_evaluate">候选 op_test 验证</button><button class="btn primary" data-action="dispatch_compare">原始与候选配对比较</button></div>
           </div>
         </div>
+        <div class="card"><h3>5. 同一 .co 的跨尺寸覆盖</h3><p class="desc">对同一个固定候选逐尺寸比较后汇总。漏测、待适配、回退均保留，不能用最快尺寸代表全部。</p>
+          <div class="form" id="assessForm"><label>各尺寸 comparison.json（每行一个）<textarea name="comparisons" rows="4"></textarea></label>
+            <label>事先约定的最大回退（比例）<input name="max_regression" type="number" min="0" step="0.01" value="0.01" /></label>
+            <button class="btn" data-action="dispatch_assess">检查跨尺寸覆盖（CPU）</button></div>
+        </div>
+        <div class="card"><h3>CPU 单元测试</h3><p class="desc">python3 -m pytest -q unittests，不启动 GPU 实验。</p><button class="btn" data-action="test">运行 CPU 单元测试</button></div>
+      </section>
 
+      <section class="tabpane" id="pane-campaigns">
         <div class="card">
-          <h3>真机验证 hw_validate.sh <span class="need">需 GPU</span></h3>
-          <p class="desc">构建候选 .s → .co，在若干 k 值上跑 N 次，统计 PASS/FAIL。</p>
-          <div class="form" id="hwForm">
-            <label>候选 .s 路径
-              <input name="candidate" placeholder="client/poc_kl/tune_out/tune_result/xxx.best_tf48.xxx.s" />
-            </label>
-            <div class="form-row">
-              <label>运行次数 runs
-                <input name="runs" type="number" min="1" max="200" value="10" />
-              </label>
-              <label>k 值（空格分隔，可空）
-                <input name="ks" placeholder="512 2048 4096" />
-              </label>
-            </div>
-            <button class="btn primary" data-action="hw_validate">✔ 开始真机验证</button>
-          </div>
+          <div class="card-head-row"><h3>远端调优任务</h3><button class="btn tiny" id="refreshCampaigns">刷新</button></div>
+          <p class="desc">页面每 15 秒刷新本机快照；后台每分钟同步任务状态、每 10 分钟写正式报告。时间按浏览器所在时区显示。</p>
+          <div class="form"><label>查找 .co / 尺寸 / CSV / 状态<input id="campaignQuery" type="search" placeholder="GEMM、MoE、MLA、.co 名称" /></label>
+          <label class="check"><input id="campaignPending" type="checkbox" /> 只显示待完成 workload / 历史 .co</label></div>
         </div>
+        <div id="campaignsBox" aria-live="polite">加载中…</div>
       </section>
 
       <!-- 结果 -->
@@ -159,11 +195,11 @@
             <h3>调优结果汇总</h3>
             <button class="btn tiny" id="refreshResults">刷新</button>
           </div>
-          <p class="desc">按 client、GPU 架构和 .co 查看调优对象、最终选择及性能对比。归档实测会单独标记。</p>
+          <p class="desc">按 client、GPU 架构、.co 和测试 workload 查看结果。尺寸、CSV 文件与行号直接显示；历史未记录的来源不补填。</p>
           <div class="form results-filters">
             <label>Client<select id="resultClient"><option value="">全部 client</option></select></label>
             <label>GFX<select id="resultGfx"><option value="">全部架构</option></select></label>
-            <label>查找 .co / symbol / 任务<input id="resultQuery" type="search" placeholder="输入 .co 名称或任务 ID" /></label>
+            <label>查找 .co / 尺寸 / CSV / 任务<input id="resultQuery" type="search" placeholder="输入尺寸、CSV 文件、行号或任务 ID" /></label>
           </div>
           <p id="resultsCount" class="desc" aria-live="polite"></p>
           <div id="resultsErrors" role="status"></div>
@@ -198,7 +234,11 @@
   </div>
 
   <div class="toast" id="toast">已复制</div>
+  <script src="workload_view.js"></script>
   <script src="results.js"></script>
   <script src="console.js"></script>
+  <script src="workloads.js"></script>
+  <script src="campaign_view.js"></script>
+  <script src="campaigns.js"></script>
 </body>
 </html>

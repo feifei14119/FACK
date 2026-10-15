@@ -36,7 +36,7 @@
       const h = await api.get("/api/health");
       const pill = $("#health");
       if (h.ok) {
-        pill.textContent = h.py38 ? "已连接 · python3.8 ✓" : "已连接 · 无 python3.8";
+        pill.textContent = h.py38 ? "已连接 · python3.8" : "已连接 · python3";
         pill.classList.add("ok");
       }
     } catch (e) {
@@ -61,19 +61,29 @@
       $$(".tabpane").forEach((x) => x.classList.remove("active"));
       t.classList.add("active");
       $("#pane-" + t.dataset.tab).classList.add("active");
-      $(".layout").classList.toggle("results-active", t.dataset.tab === "results");
+      $(".layout").classList.toggle("results-active", ["results", "campaigns", "workloads"].includes(t.dataset.tab));
+      history.replaceState(null, '', '#' + t.dataset.tab);
       if (t.dataset.tab === "results") { loadResults(); loadSkills(); }
     });
   });
+  $$('[data-goto]').forEach(button => button.addEventListener('click', () => $('[data-tab="' + button.dataset.goto + '"]').click()));
 
   // ---------------- collect form params ----------------
   function collect(action) {
     const map = {
       tune: "#tuneForm", mine: "#mineForm",
-      articulate: "#articulateForm", hw_validate: "#hwForm",
+      articulate: "#articulateForm", dispatch_plan: "#planForm", dispatch_prepare: "#taskForm",
+      dispatch_validate: "#taskForm", dispatch_init: "#taskForm", dispatch_evaluate: "#compareForm",
+      dispatch_compare: "#compareForm", dispatch_assess: "#assessForm", run_step: "#runForm",
     };
     const sel = map[action];
     const p = {};
+    if (action.startsWith('dispatch_') && action !== 'dispatch_plan' || action === 'tune' || action === 'run_step') {
+      const selected = window.FACKWorkflow && window.FACKWorkflow.selection();
+      if (!selected && action !== 'run_step') throw new Error('请先选择可验证 workload');
+      Object.assign(p, selected || {});
+      $$('#taskForm [name]').forEach(el => { if (el.value !== '') p[el.name] = el.value; });
+    }
     if (!sel) return p;
     $$(sel + " [name]").forEach((el) => {
       if (el.type === "checkbox") p[el.name] = el.checked;
@@ -84,6 +94,7 @@
 
   // ---------------- run action ----------------
   async function runAction(action) {
+    try {
     const params = collect(action);
     const res = await api.post("/api/run", { action, params });
     if (!res.ok) {
@@ -93,6 +104,7 @@
     toast("已启动：" + res.data.title);
     trackJob(res.data.id, true);
     refreshJobTabs();
+    } catch (error) { toast(error.message || '操作失败', true); }
   }
 
   $$("[data-action]").forEach((btn) => {
@@ -162,6 +174,8 @@
     refreshJobTabsStatus();
     const finished = data.status === "done" || data.status === "failed" || data.status === "stopped";
     if (finished) {
+      if (!j.notified && data.status === 'done' && window.FACKWorkflow) window.FACKWorkflow.refresh();
+      j.notified = true;
       // 若没有任何运行中的作业, 停止轮询
       const anyRunning = Object.values(jobs).some((x) => x.status === "running" || x.status === "starting");
       if (!anyRunning) { clearInterval(poller); poller = null; }
@@ -279,6 +293,7 @@
     try { data = await api.get("/api/skills"); } catch (e) { box.innerHTML = '<span class="empty-hint">无法读取</span>'; return; }
     const s = data.skills || {};
     box.innerHTML = "";
+    box.appendChild(skillGroup("Agent skills · 操作与验证", s.agent || []));
     box.appendChild(skillGroup("策展库 knowledge/engine/skills", s.store || []));
     box.appendChild(skillGroup("挖掘产出 study_out/skills", s.study || []));
   }
@@ -299,6 +314,8 @@
   initHealth();
   initDefaults();
   refreshJobTabs();
+  const initialTab = $$('.tab').find(t => '#' + t.dataset.tab === location.hash);
+  if (initialTab) initialTab.click();
   // 若已有历史作业, 定期刷新一次标签
   setInterval(() => { if (!poller) refreshJobTabs(); }, 5000);
 })();

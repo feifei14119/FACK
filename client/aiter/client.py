@@ -8,6 +8,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+from dataclasses import asdict
 
 from client.aiter.common import HERE, UPSTREAM, options, source_target
 from harness.evaluator import EvalResult
@@ -38,6 +39,10 @@ def identity(ctx):
         resources["upstream:" + name] = inside(UPSTREAM, name)
     for name, path in data.get("resources", {}).items():
         resources["driver:" + name] = Path(opts.manifest).parent / path
+    if "dispatch" in data:
+        resources["dispatch_snapshot"] = Path(opts.manifest).parent / data["dispatch"]["snapshot"]
+        resources["dispatch_code"] = HERE / "dispatch.py"
+        resources["dispatch_gemm_driver"] = HERE / "hsa/gfx942/gemm_driver.py"
     gitfile = UPSTREAM / ".git"
     if gitfile.is_file():
         gitdir = (UPSTREAM / gitfile.read_text().strip()[8:]).resolve()
@@ -102,8 +107,9 @@ class AiterEvaluator:
 
     def evaluate(self, s_path, with_counters=False):
         opts, config = self.opts, self.config
-        Path(self.ctx.out_dir).mkdir(parents=True, exist_ok=True)
-        work = Path(tempfile.mkdtemp(prefix="eval-", dir=self.ctx.out_dir))
+        output_dir = opts.output_dir or self.ctx.out_dir
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        work = Path(tempfile.mkdtemp(prefix="eval-", dir=output_dir))
         result = EvalResult(compiled=False, detail={"work_dir": str(work)})
         evidence = BuildEvidence(s_path, lambda: collect_identity(**identity(self.ctx)))
         try:
@@ -129,6 +135,14 @@ class AiterEvaluator:
                            co_sha256=evidence.data["artifact_after_build"]["sha256"],
                            seed=opts.seed, warmup=opts.warmup, iters=opts.iters, samples=opts.samples,
                            log_path=str(work / "runner.log"))
+            if "dispatch" in config:
+                # aiter receives a disposable copy, never the upstream table or
+                # the frozen plan. Install its env override before importing it.
+                from client.aiter.dispatch import validate_binding
+                snapshot = validate_binding(config, opts.manifest, UPSTREAM)
+                frozen_copy = work / "dispatch-config.csv"
+                shutil.copyfile(snapshot, frozen_copy)
+                request["dispatch_snapshot"] = str(frozen_copy)
             (work / "request.json").write_text(json.dumps(request, indent=2) + "\n")
             env = {k: v for k, v in os.environ.items() if not k.startswith("AITER_")}
             for key in ("CK_DIR", "HIP_KITTENS_DIR", "GPU_ARCHS", "PYTHONPATH"):
@@ -136,7 +150,7 @@ class AiterEvaluator:
             cache_inputs = {k: v for k, v in evidence.data["identity_before"]["resources"].items()
                             if k.startswith("upstream") or k in ("catalog", "python", "assembler", "linker")}
             cache_key = hashlib.sha256(json.dumps(cache_inputs, sort_keys=True).encode()).hexdigest()[:20]
-            cache_dir = Path(self.ctx.out_dir).resolve() / "jit" / config["arch"] / cache_key
+            cache_dir = Path(output_dir).resolve() / "jit" / config["arch"] / cache_key
             # aiter's cpp_itfs cache is separate from its legacy JIT cache.
             # Both must be writable even when the container UID has no home.
             env.update(AITER_META_DIR=str(UPSTREAM), AITER_JIT_DIR=str(cache_dir),
@@ -149,7 +163,17 @@ class AiterEvaluator:
             result.detail["runner"] = report
             if report.get("error"):
                 raise ValueError(report["error"])
-            if config.get("validation_hook") and report.get("op_test", {}).get("correct") is not True:
+            if "dispatch" in config:
+                checked = report.get("dispatch_check", {})
+                if (checked.get("correct") is not True or
+                        checked.get("workload_id") != config["dispatch"]["workload_id"] or
+                        checked.get("cu_num") != config["dispatch"]["cu_num"]):
+                    raise ValueError("runner did not verify the frozen workload's normal dispatch")
+            # A basic full-output failure stops the runner before op_test.
+            # Preserve its explicit false verdict rather than masking it as
+            # missing secondary validation. Successful cases still require it.
+            if (report.get("correct") is True and config.get("validation_hook") and
+                    report.get("op_test", {}).get("correct") is not True):
                 raise ValueError("runner did not report the required driver validation")
             if (report.get("schema_version") != 1 or report.get("co_sha256") != request["co_sha256"] or
                     report.get("arch") != config["arch"] or report.get("symbol") != config["symbol"] or
@@ -175,6 +199,15 @@ class AiterEvaluator:
                 result.detail["evidence_error"] = "source/artifact/declared inputs changed or build incomplete"
             if with_counters:
                 result.detail["counter_error"] = "aiter client does not implement hardware counters yet"
+            # Preserve the client verdict after build/identity checks, so the
+            # UI never mistakes a raw runner success for an accepted evaluation.
+            summary = work / "evaluation.json"
+            temporary = summary.with_suffix(".json.tmp")
+            try:
+                temporary.write_text(json.dumps(asdict(result), indent=2, allow_nan=False) + "\n")
+                temporary.replace(summary)
+            except (OSError, ValueError, TypeError) as exc:
+                result.detail["evaluation_summary_error"] = str(exc)
         return result
 
 

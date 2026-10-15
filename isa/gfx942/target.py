@@ -51,7 +51,10 @@ class Gfx942Target:
         uses: Set = set()
         kind, _ = _cls.classify(opcode, operand_strs)
 
-        has_dest = _cls.has_register_dest(opcode, kind)
+        # LDS-direct VMEM returns data to LDS; operand[0] is an address,
+        # not a VGPR result. Keep it as a use for RAW/WAR scheduling edges.
+        has_dest = (_cls.has_register_dest(opcode, kind)
+                    and not _cls.is_lds_load(opcode, operand_strs))
         for i, field_str in enumerate(operand_strs):
             units = _ops.parse_operand_field(field_str, self._aliases)
             if i == 0 and has_dest:

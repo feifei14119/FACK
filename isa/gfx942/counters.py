@@ -35,6 +35,9 @@ _SYM_BY_NAME = {v: k for k, v in _NAME_BY_SYM.items()}
 class Gfx942CounterModel(CounterModel):
     names = ["vm", "lgkm", "exp", "vs"]
     widths = {"vm": 63, "lgkm": 15, "exp": 7, "vs": 63}
+    # Prologue loads can still be live on the first loop iteration. Their
+    # issue order need not match the software-pipelined steady-state body.
+    seed_loop_entry = True
 
     def is_wait(self, opcode: str) -> bool:
         return opcode.lower() in (

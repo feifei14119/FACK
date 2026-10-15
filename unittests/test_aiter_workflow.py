@@ -88,7 +88,8 @@ def test_gemm(dtype,m,n,k,**kwargs):
         for fail in (0, 0.01):
             calls=[]
             original=lambda *a,**kw: calls.append(kw)
-            aiter=SimpleNamespace(gemm_a8w8_blockscale_bpreshuffle_asm=original,dtypes=SimpleNamespace(bf16='bf16'))
+            aiter=SimpleNamespace(gemm_a8w8_blockscale_bpreshuffle_asm=original,
+                                  gemm_a8w8_blockscale_bpreshuffle=original,dtypes=SimpleNamespace(bf16='bf16'))
             torch=SimpleNamespace(isfinite=lambda a:SimpleNamespace(all=lambda:SimpleNamespace(item=lambda:True)))
             code=compile('FAILURE_RATIO='+str(fail)+'\n'+source,'fake.py','exec')
             with patch.dict('sys.modules',{'aiter':aiter,'torch':torch}), \

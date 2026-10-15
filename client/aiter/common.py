@@ -53,6 +53,9 @@ def load_manifest(path, arch):
             raise ValueError("symbol/.co pair not uniquely present in HSA catalog")
         if any(str(matching[0].get(k)) != str(v) for k, v in data.get("selection", {}).items()):
             raise ValueError("HSA catalog layout differs from manifest selection")
+    if "dispatch" in data:
+        from client.aiter.dispatch import validate_binding
+        validate_binding(data, path, UPSTREAM)
     return data, driver
 
 
@@ -72,7 +75,13 @@ def options(ctx):
     ap.add_argument("--iters", type=int, default=max(1, ctx.loop))
     ap.add_argument("--samples", type=int, default=5)
     ap.add_argument("--timeout", type=float, default=1800)
+    ap.add_argument("--output-dir", help="evaluation artifacts under client/aiter/tune_out")
     opts = ap.parse_args(ctx.params)
+    if opts.output_dir:
+        opts.output_dir = str(Path(opts.output_dir).resolve())
+        root = (HERE / "tune_out").resolve()
+        if root not in Path(opts.output_dir).parents and Path(opts.output_dir) != root:
+            raise ValueError("--output-dir must be inside client/aiter/tune_out")
     interpreter = shutil.which(opts.python)
     if interpreter:
         # Preserve a venv executable symlink while making it independent of runner cwd.
@@ -85,6 +94,8 @@ def options(ctx):
     for key in ("m", "n", "k"):
         value = getattr(opts, key)
         if value is not None:
+            if "dispatch" in data and value != data["inputs"].get(key):
+                raise ValueError("CSV-bound workload cannot override --{}; generate another task".format(key))
             if value <= 0:
                 raise ValueError("shape dimensions must be positive")
             data["inputs"][key] = value

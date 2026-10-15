@@ -14,7 +14,14 @@ HERE = Path(__file__).resolve().parent
 UPSTREAM = HERE.parents[1] / "upstream"
 TEST_REL = "op_tests/test_gemm_a8w8_blockscale.py"
 TEST_SHA256 = "4be1b0fae5f43b786aa077673dccf2bbdcdd9a3036b7cb69f3ed93091eb0a9f3"
+CK_REL = "csrc/ck_gemm_a8w8_blockscale_bpreshuffle/gemm_a8w8_blockscale_bpreshuffle.cu"
+CK_SHA256 = "8b9632d8d8b1ddb16fbf0e2aec4381ddc838dc95f8a7fb5baa77ab26f000917c"
+CK_DEFAULT = "a8w8_blockscale_bpreshuffle_1x128x128_256x64x64x128_16x16_16x16_8x32x1_8x32x1_1x32x1x8_8_2x1_intrawave_v1"
 SYMBOL = "_ZN5aiter42fp8gemm_bf16_blockscale_BpreShuffle_32x128E"
+SYMBOLS = frozenset(
+    "_ZN5aiter{}fp8gemm_bf16_blockscale_BpreShuffle_{}x128E".format(43 if tile == 128 else 42, tile)
+    for tile in (32, 48, 64, 80, 96, 128)
+)
 
 _spec = importlib.util.spec_from_file_location("fack_blockscale_base", HERE / "driver.py")
 _base = importlib.util.module_from_spec(_spec)
@@ -50,8 +57,8 @@ def validate_row(row):
 
 def validate(inputs, symbol, seed):
     """Explicit once-per-evaluation hook. Any seed is valid; no hidden seed sentinel."""
-    if symbol != SYMBOL:
-        raise ValueError("this op_test adapter only supports its reviewed blockscale symbol")
+    if symbol not in SYMBOLS:
+        raise ValueError("this op_test adapter only supports reviewed splitK=1 blockscale symbols")
     import torch
     import aiter
 
@@ -59,8 +66,19 @@ def validate(inputs, symbol, seed):
     namespace = {"__file__": str(path), "__name__": "fack_upstream_optest"}
     exec(definitions(path), namespace)
     original = aiter.gemm_a8w8_blockscale_bpreshuffle_asm
+    original_ck = aiter.gemm_a8w8_blockscale_bpreshuffle
+    if hashlib.sha256((UPSTREAM / CK_REL).read_bytes()).hexdigest() != CK_SHA256:
+        raise ValueError("upstream CK default dispatch changed; review adapter")
     original_check = namespace["checkAllclose"]
     calls, checks, rows = [], [], []
+
+    def default_ck(x, weight, x_scale, w_scale, dtype=aiter.dtypes.bf16):
+        # Use the pinned C++ default branch explicitly. Merged tuning CSVs may
+        # name kernels absent from the prebuilt registry. Both regular and
+        # strided scale tests still run the independent CK implementation.
+        from aiter.ops.gemm_op_a8w8 import gemm_a8w8_blockscale_bpreshuffle_ck
+        out = torch.empty((x.shape[0], weight.shape[0]), device=x.device, dtype=dtype)
+        return gemm_a8w8_blockscale_bpreshuffle_ck(x, weight, x_scale, w_scale, out, kernelName="")
 
     def selected(*args, **kwargs):
         kwargs.update(kernelName=symbol, splitK=1, bpreshuffle=True)
@@ -77,6 +95,7 @@ def validate(inputs, symbol, seed):
         return ratio
 
     aiter.gemm_a8w8_blockscale_bpreshuffle_asm = selected
+    aiter.gemm_a8w8_blockscale_bpreshuffle = default_ck
     namespace["checkAllclose"] = checked
     try:
         for data_init, scale_init in (("constant", "constant"), ("uniform", "auto")):
@@ -92,7 +111,10 @@ def validate(inputs, symbol, seed):
             rows.append(row)
     finally:
         aiter.gemm_a8w8_blockscale_bpreshuffle_asm = original
+        aiter.gemm_a8w8_blockscale_bpreshuffle = original_ck
         namespace["checkAllclose"] = original_check
     return {"correct": True, "test": TEST_REL, "test_sha256": TEST_SHA256, "function": "test_gemm",
             "symbol": symbol, "splitK": 1, "seed": seed, "asm_calls": len(calls),
-            "rows": rows, "checks": checks, "timing": "upstream perftest profiler with rotating inputs"}
+            "rows": rows, "checks": checks, "ck_dispatch": {"source": CK_REL, "sha256": CK_SHA256,
+            "kernel": CK_DEFAULT, "selection": "explicit pinned default; merged CSV bypassed"},
+            "timing": "upstream perftest profiler with rotating inputs"}
