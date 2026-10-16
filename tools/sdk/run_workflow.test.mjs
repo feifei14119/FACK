@@ -5,7 +5,26 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { parseArgs, initArgs, buildPrompt, finishRun, prepareSeed, recordProvenance,
-  sha256, shellCommand, transcriptPaths } from "./run_workflow.mjs";
+  sha256, shellCommand, transcriptPaths, disposeAgent } from "./run_workflow.mjs";
+import { renderAgentProfile } from "./run_workflow.mjs";
+
+test("client-selected skill snapshots reach the model without hardcoded architecture or test methods", () => {
+  const content = "Custom project uses event_timer and reference_check.\n";
+  const profile = {arch: "gfx1100", client: "custom/case", skills: [
+    {role: "client", path: "knowledge/skills/custom/SKILL.md", content, sha256: sha256(content)}],
+    validation: {metrics: {event_timer: {unit: "us", direction: "lower"}}}};
+  const prompt = buildPrompt({python: "python3", repo: "/repo", runDir: "/run", opts: options(),
+    manifest: {budget: {}, perf_repeats: 3, evaluation_contract: {agent_profile: profile}}});
+  assert.ok(prompt.includes(content));
+  assert.ok(prompt.includes("gfx1100"));
+  assert.equal(prompt.includes("gfx942"), false);
+  assert.equal(prompt.includes("op_test"), false);
+  assert.equal(prompt.includes("hip_graph"), false);
+  assert.match(prompt, /do not\nexecute those outer steps or stop the shared environment/);
+  assert.match(prompt, /each required metric with its unit/);
+  profile.skills[0].content += "changed";
+  assert.throws(() => renderAgentProfile(profile), /digest mismatch/);
+});
 
 const policy = { method: "paired_sign_v1", confirm_pairs: 8, final_pairs: 8,
   min_gain: 0.01, alpha: 0.05, max_confirmations: 3 };
@@ -109,6 +128,14 @@ test("SDK exception reports without client work; final error still reports once 
   assert.match(finalFailure.result.errors[0], /recovery_required/);
 });
 
+test("agent cleanup has a bounded wait for stalled creation and disposal", async () => {
+  const stalled = new Promise(() => {});
+  await assert.rejects(disposeAgent(stalled, { timeoutMs: 5 }), /termination is unverified/);
+  await assert.rejects(disposeAgent(Promise.resolve({ [Symbol.asyncDispose]: () => stalled }),
+    { timeoutMs: 5 }), /termination is unverified/);
+  await assert.rejects(disposeAgent(Promise.resolve({})), /no async disposal method/);
+});
+
 test("prompt binds observations, region and authority without re-interpolating client tokens", () => {
   const opts = options(["--region", "epilogue", "--", "secret opaque marker"]);
   const prompt = buildPrompt({ python: "python3", repo: "/repo", runDir: "/run 'quoted'", opts,
@@ -117,6 +144,9 @@ test("prompt binds observations, region and authority without re-interpolating c
   assert.match(prompt, /Tune only region "epilogue"/);
   assert.match(prompt, /Do not call confirm or final/);
   assert.doesNotMatch(prompt, /secret opaque marker/);
+  assert.match(prompt, /a zero CLI exit code alone does not mean a valid measurement/);
+  assert.match(prompt, /bytes differ from original/);
+  assert.match(prompt, /final_eval_reserve protects calls, not elapsed time/);
 });
 
 test("suggest prompt uses returned versioned observation and untried directions before refinement", () => {
@@ -331,12 +361,24 @@ function fakeDriver(t) {
   fs.writeFileSync(path.join(stub, "index.mjs"), `
 import fs from "node:fs";
 import path from "node:path";
+const root = process.env.FAKE_ROOT;
+const mark = (name) => fs.writeFileSync(path.join(root, name), "fake SDK only");
+async function interruptAt(stage) {
+  if (process.env.FAKE_INTERRUPT_AT !== stage) return;
+  setTimeout(() => process.kill(process.pid, process.env.FAKE_SIGNAL || "SIGTERM"), 0);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+}
+await interruptAt("import");
 export const Agent = { async create() {
-  fs.writeFileSync(path.join(process.env.FAKE_ROOT, "model-started"), "fake SDK only");
-  return { agentId: "fake-agent", async send() { return {
-    id: "fake-sdk-run", async *stream() { yield { type: "status" }; },
-    async wait() { return { status: "finished", id: "fake-sdk-run" }; }
-  }; }, async [Symbol.asyncDispose]() {} };
+  mark("model-started");
+  await interruptAt("create");
+  return { agentId: "fake-agent", async send() { mark("model-sent"); await interruptAt("send"); return {
+    id: "fake-sdk-run", async *stream() { await interruptAt("stream"); yield { type: "status" }; },
+    async wait() { await interruptAt("wait"); return { status: "finished", id: "fake-sdk-run" }; }
+  }; }, async [Symbol.asyncDispose]() {
+    mark("model-disposed");
+    if (process.env.FAKE_DISPOSE_ERROR === "1") throw new Error("fake disposal failed");
+  } };
 } };`);
   const runner = path.join(root, "fake-python");
   fs.writeFileSync(runner, `#!${process.execPath}
@@ -354,7 +396,7 @@ else if (args[1] === "init") {
   fs.mkdirSync(run);
   const searchIndex = args.indexOf("--search-policy");
   const manifest = { original_sha256: crypto.createHash("sha256").update(fs.readFileSync(args[2])).digest("hex"),
-    budget: {}, perf_repeats: 1, comparison_policy: null,
+    budget: {}, perf_repeats: 1, comparison_policy: process.env.FAKE_COMPARISON === "1" ? {configured: true} : null,
     search_policy: searchIndex >= 0 ? JSON.parse(fs.readFileSync(args[searchIndex + 1])) : { profile_call_limit: 0 } };
   fs.writeFileSync(path.join(run, "manifest.json"), JSON.stringify(manifest));
   fs.writeFileSync(path.join(run, "state.json"), JSON.stringify({ authority: "untouched", phase: "search", final_result: null }));
@@ -365,6 +407,9 @@ else if (args[1] === "init") {
 else if (args[0] === "tools/tune_run_report.py") {
   JSON.parse(fs.readFileSync(path.join(run, "state.json")));
   reply({ markdown_path: path.join(run, "report/report.md") });
+} else if (args[1] === "final") {
+  if (!fs.existsSync(path.join(root, "model-disposed"))) throw Error("final before disposal");
+  reply({ status: "original_retained" });
 } else { throw Error("Unexpected client call"); }
 `, { mode: 0o700 });
   const seed = path.join(root, "seed.s");
@@ -372,11 +417,45 @@ else if (args[0] === "tools/tune_run_report.py") {
   const runDir = path.join(root, "tune_out/runs/fake");
   const invoke = (extra = [], env = {}) => spawnSync(process.execPath,
     [path.join(sdk, "tune.mjs"), seed, "--client", "fake/case", "--run-id", "fake", ...extra], {
-      encoding: "utf8", env: { ...process.env, CURSOR_API_KEY: "fake-not-sent-to-network",
+      encoding: "utf8", timeout: 15000, env: { ...process.env, CURSOR_API_KEY: "fake-not-sent-to-network",
         TESTFT_PYTHON: runner, FAKE_ROOT: root, ...env },
     });
   return { root, runDir, invoke };
 }
+
+test("interrupt at each SDK await boundary stops work, disposes late creation and reports", (t) => {
+  for (const stage of ["import", "create", "send", "stream", "wait"]) {
+    for (const signal of ["SIGINT", "SIGTERM"]) {
+      const fake = fakeDriver(t);
+      const result = fake.invoke([], { FAKE_INTERRUPT_AT: stage, FAKE_SIGNAL: signal, FAKE_COMPARISON: "1" });
+      assert.equal(result.status, signal === "SIGINT" ? 130 : 143, result.stderr);
+      assert.equal(fs.existsSync(path.join(fake.root, "model-sent")), !["import", "create"].includes(stage));
+      assert.equal(fs.existsSync(path.join(fake.root, "model-disposed")), stage !== "import");
+      const calls = fs.readFileSync(path.join(fake.root, "calls.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
+      assert.equal(calls.at(-1)[0], "tools/tune_run_report.py");
+      assert.equal(calls.some((args) => ["eval", "confirm", "final", "resume"].includes(args[1])), false);
+    }
+  }
+});
+
+test("normal SDK completion disposes the worker before one configured final and report", (t) => {
+  const fake = fakeDriver(t);
+  const result = fake.invoke([], { FAKE_COMPARISON: "1" });
+  assert.equal(result.status, 0, result.stderr);
+  const calls = fs.readFileSync(path.join(fake.root, "calls.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
+  assert.equal(calls.filter((args) => args[1] === "final").length, 1);
+  assert.equal(calls.at(-1)[0], "tools/tune_run_report.py");
+});
+
+test("failed SDK disposal prevents final and returns an error while preserving the report", (t) => {
+  const fake = fakeDriver(t);
+  const result = fake.invoke([], { FAKE_DISPOSE_ERROR: "1", FAKE_COMPARISON: "1" });
+  assert.equal(result.status, 3, result.stderr);
+  assert.match(result.stderr, /fake disposal failed/);
+  const calls = fs.readFileSync(path.join(fake.root, "calls.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
+  assert.equal(calls.at(-1)[0], "tools/tune_run_report.py");
+  assert.equal(calls.some((args) => args[1] === "final"), false);
+});
 
 test("real driver blocks authority aliases before fake SDK starts and still reports", (t) => {
   for (const mode of ["state", "markdown-symlink", "report-md"]) {

@@ -14,6 +14,7 @@ import statistics
 
 from agent.replay import ReplayError, _spec, source_sha256, verify_chain
 from harness.comparison import assess_pairs, look_sizes, pair_order, validate_policy
+from harness.validation import evidence as validation_evidence, assess_methods, combined_verdict
 from harness.measurement import valid_score
 
 
@@ -71,7 +72,7 @@ def _artifacts(directory, manifest, state):
     return sources
 
 
-def _batch(state, batch_id, candidate_id, stage, count, context=None):
+def _batch(state, batch_id, candidate_id, stage, count, context=None, validation=None):
     batch = state["batches"].get(batch_id)
     _require(isinstance(batch, dict) and batch.get("id") == batch_id and
              batch.get("candidate_id") == candidate_id and batch.get("stage") == stage and
@@ -96,6 +97,8 @@ def _batch(state, batch_id, candidate_id, stage, count, context=None):
                      "paired measurement context mismatch")
         _require(result.get("compiled") is True and result.get("correct") is True and
                  valid_score(result.get("tflops")), "invalid historical sample")
+        if validation:
+            validation_evidence(result, validation)
         scores.append(result["tflops"])
     score = statistics.median(scores)
     _require(measurement.get("tflops") == score, "historical batch summary mismatch")
@@ -107,7 +110,8 @@ def _screen(manifest, state, candidate_id):
                if b.get("candidate_id") == candidate_id and b.get("stage") == "screen"]
     _require(bool(batches), "historical original/candidate screening evidence is missing")
     batch = max(batches, key=lambda b: b["sequence"])
-    _batch(state, batch["id"], candidate_id, "screen", manifest["perf_repeats"])
+    _batch(state, batch["id"], candidate_id, "screen", manifest["perf_repeats"],
+           validation=manifest["evaluation_contract"].get("agent_profile", {}).get("validation"))
 
 
 def _comparison(manifest, state, comparison):
@@ -115,6 +119,7 @@ def _comparison(manifest, state, comparison):
              comparison.get("status") == "completed" and comparison.get("verdict") == "confirmed_gain",
              "historical winner lacks completed confirmation")
     stage, policy = comparison["stage"], validate_policy(manifest["comparison_policy"])
+    validation = manifest["evaluation_contract"].get("agent_profile", {}).get("validation")
     for role in ("candidate", "reference"):
         candidate = state["candidates"].get(comparison.get(role + "_id"))
         _require(candidate is not None and candidate["artifact"]["sha256"] == comparison.get(role + "_sha256"),
@@ -130,7 +135,13 @@ def _comparison(manifest, state, comparison):
         actual = {}
         for role in pair_order(index):
             score, ids = _batch(state, pair.get("batches", {}).get(role), comparison[role + "_id"], stage, 1,
-                                {"comparison_id": comparison["id"], "pair_index": index, "role": role})
+                                {"comparison_id": comparison["id"], "pair_index": index, "role": role}, validation)
+            if validation:
+                values, normalized = validation_evidence(state["attempts"][ids[0]]["result"], validation)
+                _require(pair.get("metric_values", {}).get(role) == values and
+                         pair.get("metric_scores", {}).get(role) == normalized,
+                         "historical client metrics mismatch")
+                score = normalized[validation["primary_metric"]]
             _require(not used.intersection(ids), "historical comparison reuses a sample")
             used.update(ids)
             actual[role] = score
@@ -143,6 +154,10 @@ def _comparison(manifest, state, comparison):
     _require(analysis is not None, "historical comparison did not stop at its first stopping look")
     _require(analysis == comparison.get("analysis") and analysis["verdict"] == "confirmed_gain",
              "historical confirmation does not reproduce")
+    if validation:
+        methods = assess_methods(pairs, validation, policy, stage)
+        _require(methods == comparison.get("methods") and combined_verdict(methods) == "confirmed_gain",
+                 "historical client metric confirmation does not reproduce")
 
 
 def _reference_chain(manifest, state, sources, comparison, seen=None):

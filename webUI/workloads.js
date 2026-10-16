@@ -8,6 +8,19 @@
     select.replaceChildren(...rows.map(r => new Option(r.label, r.value)));
     if (rows.some(r => r.value === current)) select.value = current;
   };
+  function updateSdk() {
+    const planned = $('sdkSourceMode').value === 'planned';
+    document.querySelector('#tuneForm [data-action="tune"]').disabled = planned && !selected;
+    for (const name of ['seed', 'client', 'params']) {
+      document.querySelector('#tuneForm [name="' + name + '"]').readOnly = planned;
+    }
+    if (planned) {
+      document.querySelector('#tuneForm [name="client"]').value = 'aiter/hsa/gfx942';
+      document.querySelector('#tuneForm [name="seed"]').value = selected ? selected.seed : '';
+      document.querySelector('#tuneForm [name="params"]').value = selected ?
+        "--manifest '" + selected.manifest.replace(/'/g, "'\\''") + "'" : '';
+    }
+  }
   function selectTask(id) {
     selected = selectedPlan && selectedPlan.rows.find(r => r.id === id && r.manifest);
     const html = selected ? '<p class="selected-target"><strong>aiter / ' + view.esc(selectedPlan.arch) + ' / ' +
@@ -19,13 +32,11 @@
     document.querySelectorAll('[data-action^="dispatch_"]').forEach(button => {
       if (button.dataset.action !== 'dispatch_plan') button.disabled = !selected;
     });
-    document.querySelector('#tuneForm [data-action="tune"]').disabled = !selected;
+    updateSdk();
     if (selected) {
       $('taskSelect').value = selected.id;
       const runId = document.querySelector('#taskForm [name="run_id"]').value || 'dispatch-' + selected.id;
       $('runDirectory').value = 'client/aiter/tune_out/runs/' + runId;
-      document.querySelector('#tuneForm [name="seed"]').value = selected.seed;
-      document.querySelector('#tuneForm [name="params"]').value = "--manifest '" + selected.manifest.replace(/'/g, "'\\''") + "'";
     }
   }
   function selectPlan(id) {
@@ -85,6 +96,7 @@
     finally { $('refreshWorkloads').disabled = false; }
   }
   $('planSelect').addEventListener('change', () => selectPlan($('planSelect').value));
+  $('sdkSourceMode').addEventListener('change', updateSdk);
   $('taskSelect').addEventListener('change', () => selectTask($('taskSelect').value));
   ['browsePlan','workloadQuery','workloadStatus'].forEach(id => $(id).addEventListener('input', () => {page=0;render();}));
   $('workloadPrev').addEventListener('click', () => {page--;render();});

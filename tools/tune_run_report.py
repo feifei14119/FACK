@@ -64,7 +64,7 @@ def render_markdown(report):
              "- Confirmation: " + report["confirmation_status"],
              "- Final: " + (final["status"] if final else "not_performed; no recommendation"),
              "- Recommendation: " + (report["recommendation"]["id"] if report["recommendation"] else "none"),
-             "- Selected copy: " + (report["selected"]["export_path"] if report["selected"] else "none"),
+             "- Selected copy: " + ((report["selected"]["export_path"] or "not exported") if report["selected"] else "none"),
              "- Environment still matches recorded engine/runtime: " + str(report["environment_matches"]),
              "- Budget used: " + json.dumps(report["used"], ensure_ascii=False),
              "- Frozen budget: " + json.dumps(report["manifest"]["budget"], ensure_ascii=False), "",
@@ -86,6 +86,27 @@ def render_markdown(report):
         cells += [analysis.get("pairs"), comparison.get("planned_pairs"), analysis.get("stop_reason")]
         cells += [analysis.get(k) for k in ("median_ratio", "estimate_ratio", "lower_ratio_bound")]
         lines.append("| " + " | ".join(map(_cell, cells)) + " |")
+    declared = report["manifest"]["evaluation_contract"].get("agent_profile", {})
+    if declared:
+        lines.extend(["", "## Client and architecture contract", "",
+                      "- Target: " + str(declared.get("arch")),
+                      "- Architecture skill: " + str(declared.get("architecture_skill_status")),
+                      "- Frozen workload: " + json.dumps(declared.get("workload"), ensure_ascii=False),
+                      "- Validation: " + json.dumps(declared.get("validation"), ensure_ascii=False)])
+        for skill in declared.get("skills", []):
+            lines.append("- {}: {} (SHA256 {})".format(skill["role"], skill["path"], skill["sha256"]))
+    methods = [(c, name, value) for c in report["comparisons"].values()
+               for name, value in c.get("methods", {}).items()]
+    if methods:
+        lines.extend(["", "## Required metrics (each evaluated separately)", "",
+                      "The summary ratio above is the primary metric; adoption requires all declared metrics.", "",
+                      "| stage | metric | unit | reference median | candidate median | verdict | paired ratio | lower bound |",
+                      "|---|---|---|---|---|---|---|---|"])
+        for c, name, value in methods:
+            cells = [c["stage"], name] + [value.get(k) for k in
+                ("unit", "reference_median", "candidate_median", "verdict", "median_ratio", "lower_ratio_bound")]
+            lines.append("| " + " | ".join(map(_cell, cells)) + " |")
+        lines.extend(["", "Recommendation scope: frozen workload only. Whole-artifact adoption is not assessed by this run."])
     lines.extend(["", "Final relative to original: " + json.dumps(report["final_vs_original"], ensure_ascii=False),
                   "", "Final relative to normalized: not independently compared.",
                   "", "## Failures and unfinished work", ""])
@@ -102,7 +123,8 @@ def render_markdown(report):
                  len(diagnostics.get("new_findings", []))]
         lines.append("| " + " | ".join(map(_cell, cells)) + " |")
     lines.extend(["", "## Scope", "", report["scope"], "",
-                  "Score means the client's positive, higher-is-better EvalResult.tflops field. Ratios are",
+                  "Screening score means the client's positive, higher-is-better EvalResult.tflops field.",
+                  "Declared comparison metrics use their own unit and direction. Legacy score ratios are",
                   "time speedups only when the client score is throughput or inverse time. Statistical",
                   "assumptions and actual loaded code-object identity need target-hardware validation.", ""])
     if report["input_provenance"]:
@@ -227,6 +249,7 @@ def _snapshot_report(run, snapshot, output=None):
               "screening_best": screening_best, "confirmed_best": confirmed_best,
               "final_result": final, "selected": selected, "recommendation": recommendation,
               "final_vs_original": final_vs_original, "final_vs_normalized": None,
+              "final_vs_original_methods": (final or {}).get("methods"),
               "candidates": candidates, "comparisons": comparisons,
               "batches": state["batches"], "attempts": state["attempts"], "proposals": state["proposals"],
               "ledger": ledger_snapshot(manifest, state),

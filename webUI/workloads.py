@@ -77,8 +77,14 @@ def extract_workload(data, repo):
     contract = (data.get("manifest") or {}).get("evaluation_contract") or data.get("contract") or {}
     result = {"id": None, "inputs": {}, "csv": [], "selection": "unrecorded",
               "dispatch_status": "not_recorded", "notes": []}
+    frozen_workload = (contract.get("agent_profile") or {}).get("workload")
+    if isinstance(frozen_workload, dict) and "inputs" in frozen_workload:
+        result = from_manifest(frozen_workload, repo)
+        if not frozen_workload.get("dispatch"):
+            result.update(selection=frozen_workload.get("source", "recorded_inputs"),
+                          id=frozen_workload.get("id"), csv=frozen_workload.get("csv", []))
     resource = ((contract.get("client_identity") or {}).get("resources") or {}).get("manifest") or {}
-    if resource.get("path") and resource.get("sha256"):
+    if not frozen_workload and resource.get("path") and resource.get("sha256"):
         try:
             path = local_record_path(resource["path"], repo)
             if hashlib.sha256(path.read_bytes()).hexdigest() != resource["sha256"]:

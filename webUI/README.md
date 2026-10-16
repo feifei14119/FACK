@@ -43,7 +43,12 @@ bash webUI/serve.sh 9000       # 自定义端口
 - **测试 / 验证**：沿用选定 workload 的冻结 manifest，执行候选 op_test、原始/候选独立配对比较和跨尺寸覆盖汇总；CPU 测试用 pytest。
 - **结果 / 技能**：统一展示本机记录、远端同步实测和归档结果。尺寸与 CSV 来源直接可见，产物路径默认折叠。
 - **技能 / 静态挖掘**：默认读取已审核 aiter/MFMA skill 与固定 selfstudy 导出。静态语料挖掘是独立可选任务，不自动启动自学。
-- **高级 SDK**：可使用所选 manifest 启动 SDK agent；筛选结论仍需独立比较。
+- **高级 SDK**：按所选 client 和 seed 架构自动加载技能与验证契约。可填写比较策略 JSON；留空时只筛选，填写后才执行 confirm/final。aiter 的必需指标逐项展示，整份 `.co` 采用仍需关联尺寸验收。
+
+高级 SDK 的输入来源默认是所选 aiter CSV workload，此时 seed、client 和参数随任务绑定。
+选择“手动选择 client / seed”后可填写任意已接入的 client，不要求 CSV；参数由该 client 解释。
+创建 run 和高级 SDK 表单均可填写搜索策略 JSON，选择候选生成器及 CPU 尝试上限；
+留空时按目标架构启用默认生成器。搜索策略与配对比较策略分别配置、分别冻结。
 
 执行按钮使用 **Web UI 所在环境**。GPU 操作需要该环境的 ROCm Python/工具链，并明确限制单卡；远端进度页只读本机同步数据，不隐式 SSH。端口上的旧服务需要重启才会加载新后端代码。
 详细 workflow 见 [dispatch 操作](../client/aiter/docs/dispatch-workloads.md) 和 [aiter 验证](../client/aiter/docs/validation.md)。
@@ -81,6 +86,7 @@ server.py (Python3 stdlib, 绑定 0.0.0.0)
 ### Workload 元数据
 
 前端共用 `workload_view.js` 展示完整测试输入、CSV 文件/行号和正常入口验证状态。
+新 run 优先读取冻结的 `agent_profile.workload`，保留输入和来源，迁移后不依赖原 manifest 文件仍然存在。
 后端 `workloads.py` 从记录中的 workload 或 SHA 匹配的冻结 manifest 提取；早期 dispatch manifest
 缺行号时只在它记录的源 SHA 和完整行均匹配时恢复。不会用最新 CSV 反查给历史实验补来源。
 旧实验可显示记录中的 MNK；无 CSV 证据时显示“未记录”，缺尺寸时保持未知。

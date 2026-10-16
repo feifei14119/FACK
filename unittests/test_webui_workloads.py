@@ -38,6 +38,40 @@ def test_frozen_manifest_provenance_and_recorded_cli_override(tmp_path):
     assert changed["csv"] == [] and changed["notes"]
 
 
+def test_frozen_client_profile_preserves_workload_when_manifest_is_unavailable(tmp_path):
+    profile = {'arch': 'gfx942', 'workload': {'co': 'selected.co', 'symbol': 'kernel',
+        'inputs': {'m': 32, 'n': 8192, 'k': 7168}, 'dispatch': {'workload_id': 'id',
+        'reference': {'source': {'path': 'tuned.csv', 'sha256': 'sha'}, 'line': 1152}}}}
+    data = {'contract': {'client': 'aiter/hsa/gfx942', 'agent_profile': profile,
+            'client_identity': {'resources': {'manifest': {'path': 'missing.json', 'sha256': 'old'}}}}}
+    value = workloads.extract_workload(data, tmp_path)
+    assert value['inputs'] == profile['workload']['inputs']
+    assert value['csv'] == [{'path': 'tuned.csv', 'sha256': 'sha', 'line': 1152}]
+    assert value['id'] == 'id' and value['selection'] == 'dispatch_csv'
+    assert results.target(data, 'aiter') == {'client': 'aiter/hsa/gfx942', 'gfx': 'gfx942',
+                                          'co': 'selected.co', 'symbol': 'kernel'}
+
+
+def test_sdk_command_forwards_comparison_policy_before_client_params(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from webUI import server
+    monkeypatch.setattr(server, 'REPO', str(tmp_path))
+    monkeypatch.setattr(server._clients, 'resolve', lambda spec: SimpleNamespace(spec=spec))
+    (tmp_path/'seed.s').write_text('seed')
+    write(tmp_path/'policy.json', {})
+    params = {'seed': 'seed.s', 'client': 'custom/case', 'policy': 'policy.json',
+              'search_policy': 'policy.json', 'params': 'size=123'}
+    _, argv, _, _ = server.build_command('tune', params)
+    assert argv[argv.index('--comparison-policy') + 1] == str(tmp_path/'policy.json')
+    assert argv.index('--comparison-policy') < argv.index('--')
+    assert argv[argv.index('--search-policy') + 1] == str(tmp_path/'policy.json')
+    assert argv.index('--search-policy') < argv.index('--')
+    assert argv[argv.index('--') + 1:] == ['size=123']
+    params['policy'] = 'missing.json'
+    with pytest.raises(ValueError, match='策略文件不存在'):
+        server.build_command('tune', params)
+
+
 def test_old_dispatch_line_recovery_requires_unchanged_source_and_exact_row(tmp_path):
     source = tmp_path / "client/aiter/upstream/aiter/configs/tuned.csv"
     source.parent.mkdir(parents=True)
@@ -147,6 +181,13 @@ def test_actions_use_workload_manifest_and_never_override_shapes(tmp_path, task,
         assert env == {"HIP_VISIBLE_DEVICES": "GPU-example"}
         assert argv[argv.index("--client") + 1] == "aiter/hsa/gfx942"
         assert "--manifest" in argv[argv.index("--") + 1:]
+
+
+def test_dispatch_init_forwards_search_provider_policy(tmp_path, task):
+    task['search_policy'] = str(write(tmp_path/'search.json', {'candidate_providers': ['generic']}))
+    _, argv, _, _ = workflow.command('dispatch_init', task, tmp_path)
+    assert argv[argv.index('--search-policy') + 1] == task['search_policy']
+    assert argv.index('--search-policy') < argv.index('--')
 
 
 def test_gpu_action_requires_explicit_device_or_existing_visibility(tmp_path, task, monkeypatch):

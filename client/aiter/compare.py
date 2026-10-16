@@ -21,9 +21,13 @@ sys.path.insert(0, str(REPO))
 import client as clients
 from harness.comparison import assess_pairs, pair_order, validate_policy
 from tools.tune_run import client_contract, evaluation_lock
+from harness.validation import evidence as validation_evidence
 
 
-def metrics(result):
+def metrics(result, validation=None):
+    if validation:
+        values, _ = validation_evidence(asdict(result), validation)
+        return values
     if result.compiled is not True or result.correct is not True:
         raise ValueError("candidate did not compile and pass correctness: " + str(result.detail.get("error")))
     runner = result.detail.get("runner", {})
@@ -106,7 +110,7 @@ def compare(args, params):
                     record = {"trial": trial, "side": side, "result": asdict(result)}
                     report["records"].append(record)
                     save()  # preserve failed numerical results too
-                    record["times_us"] = metrics(result)
+                    record["times_us"] = metrics(result, contract.get("agent_profile", {}).get("validation"))
                     observed = {k: result.detail["runner"].get(k) for k in
                                 ("device", "arch", "torch_version", "hip_version")}
                     if device is not None and observed != device:

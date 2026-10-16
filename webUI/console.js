@@ -78,7 +78,8 @@
     };
     const sel = map[action];
     const p = {};
-    if (action.startsWith('dispatch_') && action !== 'dispatch_plan' || action === 'tune' || action === 'run_step') {
+    const plannedSdk = action === 'tune' && $('#sdkSourceMode').value === 'planned';
+    if (action.startsWith('dispatch_') && action !== 'dispatch_plan' || plannedSdk || action === 'run_step') {
       const selected = window.FACKWorkflow && window.FACKWorkflow.selection();
       if (!selected && action !== 'run_step') throw new Error('请先选择可验证 workload');
       Object.assign(p, selected || {});

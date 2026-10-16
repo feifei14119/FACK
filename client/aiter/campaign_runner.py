@@ -293,90 +293,24 @@ class Campaign:
 
     @staticmethod
     def mechanism_choices(source, region, suggestions, facts, limit):
-        from agent.session import AgentSession
-        from reorder.model import Kind
-        session = AgentSession(source, None, region=region, protect_prefetch=True)
-        editor = session._editor()
+        """Compatibility adapter: candidate design belongs to the shared suggest path."""
         obs = suggestions['observation']
-        anchors = obs['facts']['anchors']
-        slots = obs['facts']['slots']
-        current = {f['iid']:row['slot'] for row in slots for f in row['fillers']}
-        kinds = {f['iid']:f['kind'] for row in slots for f in row['fillers']}
-        report = {'mfma_facts':facts, 'accepted':[], 'rejected':[],
-                  'limits':['advisor does not establish AccVGPR or arbitrary operand safety',
-                            'control-flow and unknown opcodes prevent exact whole-kernel estimates',
-                            'engine dependency, wait and prefetch checks plus complete GPU outputs remain mandatory']}
-        choices=[]
-        occupied_valu = {row['slot']:sum(f['kind']=='valu' for f in row['fillers']) for row in slots}
-        free_valu = any(isinstance(v,dict) and v.get('valu_free',1e9)<v.get('interval',0) for v in facts.values())
-        for suggestion in suggestions['suggestions']:
-            spec=suggestion['spec']
-            if spec['kind']!='layout':
-                report['rejected'].append({'spec':spec,'reason':'no MFMA gap mechanism established'})
-                continue
-            target, ids=next(iter(spec['layout'].items())); target=int(target); iid=ids[0]
-            kind=kinds.get(iid); instruction=editor._line_of[iid].raw.strip(); reason=None
-            if kind in ('vmem_load','ds_read','smem') and suggestion['direction']=='memory_early':
-                reason='Advance this operand load within its engine-checked legal window to increase latency overlap before its consumer. Preserve VMEM/LDS ordering, lgkmcnt semantics and prefetch protection; no memory latency is inferred from the MFMA timing table.'
-            elif kind=='salu':
-                reason='Redistribute independent scalar address/control arithmetic into an MFMA gap; the gfx942 issue rules permit unrelated SALU overlap, unlike ordinary VALU. Engine checks must preserve SCC and address dependencies.'
-            elif kind=='valu' and (free_valu or (occupied_valu.get(current.get(iid),0)==1 and occupied_valu.get(target,0)>0)):
-                reason=('Test a VALU placement within the exported class release window.' if free_valu else 'The exported MFMA class has no ordinary VALU release slot: cluster this sole VALU into an already occupied gap to reduce the number of separate MFMA gaps exposed to VALU issue contention.')
-            if reason is None:
-                report['rejected'].append({'spec':spec,'instruction':instruction,'reason':'no useful exported-window or operand-read hypothesis for this move'})
-                continue
-            value=dict(suggestion)
-            value['hypothesis']=dict(suggestion['hypothesis'],hypothesis=instruction+'; '+reason,
-                expected_observable='Lower full-kernel event time under fresh independent confirmation; local interval evidence alone is insufficient.')
-            choices.append(value); report['accepted'].append({'spec':spec,'instruction':instruction,'kind':kind,'source_gap':current.get(iid),'target_gap':target,'mechanism':reason})
-        # Existing suggest enumerates VALU before later scalar chains. Explicitly
-        # examine a bounded set of independent SALU operations for empty gaps.
-        positions={iid:i for i,iid in enumerate(editor.order)}
-        tested=0
-        for iid in editor.order:
-            if editor.kind_of(iid)!=Kind.SALU or iid in editor._fences or iid not in current: continue
-            for target in range(max(0,current[iid]-3),current[iid]):
-                if len(choices)>=limit or tested>=48: break
-                tested+=1
-                if target>=len(anchors)-1: continue
-                if sum(f['kind']=='salu' for f in slots[target]['fillers'])>=3: continue
-                layout={target:[iid]}; validation=session.propose([layout])[0]
-                if not validation.legal or validation.skipped: continue
-                spec={'kind':'layout','region':region,'layout':{str(target):[iid]}}
-                if any(c['spec']==spec for c in choices): continue
-                instruction=editor._line_of[iid].raw.strip()
-                reason='Move an independent scalar address/control operation from a crowded tail into an earlier MFMA gap with fewer than three SALU instructions. Preserve engine SCC/register/address constraints; MFMA class issue facts motivate scalar overlap only.'
-                hypothesis={'hypothesis':instruction+'; '+reason,'expected_observable':'Lower confirmed event time without any output/loader change','direction':'salu_gap_balance','source':'observation','evidence_refs':[{'kind':'observation','id':obs['observation_id']}]}
-                choices.append({'spec':spec,'hypothesis':hypothesis,'direction':'salu_gap_balance'})
-                report['accepted'].append({'spec':spec,'instruction':instruction,'kind':'salu','source_gap':current.get(iid),'target_gap':target,'mechanism':reason})
-            if len(choices)>=limit or tested>=48: break
-        # A one-instruction move in a long unrolled loop can be below the
-        # predeclared 1% threshold. Test at most two repeated, independently
-        # checked mechanisms across its existing barrier-separated stages.
-        grouped=[]
-        for kind_set,direction,explanation in [
-            ({Kind.VMEM_LOAD,Kind.DS_READ},'repeated_operand_prefetch','Advance legal operand loads by one MFMA gap across the existing unrolled stages to increase overlap with outstanding memory latency; preserve all barrier/wait and address dependencies.'),
-            ({Kind.SALU},'repeated_salu_balance','Distribute legal scalar address/control updates across earlier MFMA gaps in repeated unrolled stages; exported MFMA rules motivate independent SALU overlap, with SCC/register ordering checked by the engine.')]:
-            layout={};moved=[];trials=0
-            for iid in editor.order:
-                if editor.kind_of(iid) not in kind_set or iid not in current or iid in editor._fences:continue
-                target=current[iid]-1
-                if target<0 or target>=len(anchors)-1:continue
-                trials+=1
-                if trials>64 or len(moved)>=12:break
-                trial=dict(layout)
-                trial[target]=list(trial.get(target,[]))+[iid]
-                validation=session.propose([trial])[0]
-                if not validation.legal or validation.skipped:continue
-                layout=trial;moved.append(iid)
-            if len(moved)<2:continue
-            spec={'kind':'layout','region':region,'layout':{str(k):v for k,v in layout.items()}}
-            hypothesis={'hypothesis':explanation+' Moved IIDs: '+str(moved),
-                        'expected_observable':'An aggregate full-kernel speedup above the fixed gain threshold with complete outputs unchanged',
-                        'direction':direction,'source':'observation','evidence_refs':[{'kind':'observation','id':obs['observation_id']}]}
-            grouped.append({'spec':spec,'hypothesis':hypothesis,'direction':direction})
-            report['accepted'].append({'spec':spec,'instructions':[editor._line_of[i].raw.strip() for i in moved],'placements':[{'iid':i,'source_gap':current[i],'target_gap':current[i]-1} for i in moved],'mechanism':explanation})
-        return (grouped+choices)[:limit],report
+        if obs['base_sha256'] != hashlib.sha256(source.encode('utf-8')).hexdigest() or obs['region'] != region:
+            raise ValueError('candidate suggestions do not match the current source/region')
+        if type(limit) is not int or not 0 <= limit <= 32:
+            raise ValueError('candidate limit must be within [0, 32]')
+        choices = copy.deepcopy(suggestions['suggestions'][:limit])
+        report = {'mfma_facts': facts, 'candidate_providers': suggestions.get('candidate_providers', []),
+                  'accepted': [], 'rejected': [],
+                  'limits': ['generators propose hypotheses, not hardware timing predictions',
+                             'complete intents still require prepare and client validation']}
+        for item in choices:
+            report['accepted'].append({
+                'provider': item.get('provider'), 'spec': copy.deepcopy(item['spec']),
+                'candidate_sha256': item.get('candidate_sha256'),
+                'details': copy.deepcopy(item.get('details', {})),
+                'mechanism': item['hypothesis']['hypothesis']})
+        return choices, report
 
     @staticmethod
     def measurement_summary(measurement):

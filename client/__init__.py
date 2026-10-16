@@ -89,6 +89,11 @@ class Client:
             return fn(self.context(**kw))
         return (self.module.__doc__ or "").strip()
 
+    def agent_profile(self, *, arch=None, **kw) -> dict:
+        """Compose declared client and target skills without GPU or SDK calls."""
+        from client.guidance import compose
+        return compose(self, self.context(**kw), arch=arch)
+
     def identity(self, **kw) -> dict:
         """Read-only optional client identity; legacy clients remain supported."""
         from harness.evidence import collect_identity, unavailable_identity
@@ -165,6 +170,25 @@ def list_clients() -> List[str]:
 
 
 def main(argv: List[str]) -> int:
+    if argv[:1] == ["guidance"]:
+        import argparse
+        ap = argparse.ArgumentParser(description="Print frozen-input guidance for an external agent; CPU only")
+        ap.add_argument("spec")
+        ap.add_argument("--seed")
+        ap.add_argument("--arch")
+        ap.add_argument("--loop", type=int, default=20)
+        tokens = argv[1:]
+        cut = tokens.index("--") if "--" in tokens else len(tokens)
+        args = ap.parse_args(tokens[:cut])
+        try:
+            from pathlib import Path
+            source = Path(args.seed).read_text() if args.seed else ""
+            print(json.dumps(resolve(args.spec).agent_profile(seed_src=source,
+                             params=tokens[cut + 1:], loop=args.loop, arch=args.arch), ensure_ascii=False))
+            return 0
+        except (OSError, ValueError, KeyError) as exc:
+            sys.stderr.write(str(exc) + "\n")
+            return 2
     if argv[:1] == ["list"]:
         for c in list_clients():
             print(c)
@@ -176,5 +200,5 @@ def main(argv: List[str]) -> int:
             sys.stderr.write("{}\n".format(exc))
             return 2
         return 0
-    sys.stderr.write("usage: python3 -m client list | resolve <spec>\n")
+    sys.stderr.write("usage: python3 -m client list | resolve <spec> | guidance <spec> [--seed FILE] [--arch GFX] -- PARAMS\n")
     return 2

@@ -1,5 +1,6 @@
 """CPU search navigation: policy gates and engine-checked small proposals."""
 import copy
+import hashlib
 import json
 from unittest import mock
 
@@ -30,7 +31,8 @@ def test_policy_defaults_are_complete_independent_and_profile_opt_in():
     policy = validate_search_policy()
     assert policy == {"direction_eval_call_limit": None, "profile_call_limit": 0,
                       "stagnation_limit": None, "reuse_proposal_limit": None,
-                      "reuse_eval_call_limit": None, "independent_eval_reserve": 0}
+                      "reuse_eval_call_limit": None, "independent_eval_reserve": 0,
+                      "candidate_providers": None, "candidate_attempt_limit": 96}
     policy["profile_call_limit"] = 7
     assert validate_search_policy()["profile_call_limit"] == 0
     original = {"profile_call_limit": 2, "reuse_proposal_limit": 0, "stagnation_limit": 1}
@@ -65,7 +67,7 @@ def assert_proposals(source, rows, region="loop"):
     normalized, _ = driver.build_candidate(source, dict(BUILD_POLICY, kind="ladder", level=1, region=region))
     seen = {source, normalized}
     for row in rows:
-        assert set(row) == {"direction", "spec", "hypothesis"}
+        assert {"direction", "spec", "hypothesis", "provider", "candidate_sha256"} <= set(row)
         spec = row["spec"]
         assert spec["region"] == region
         assert not (set(spec) & set(BUILD_POLICY))
@@ -79,6 +81,7 @@ def assert_proposals(source, rows, region="loop"):
             assert report["legal"] and not report["skipped"]
         candidate, ok = driver.build_candidate(source, dict(spec, **BUILD_POLICY))
         assert ok and candidate not in seen
+        assert row["candidate_sha256"] == hashlib.sha256(candidate.encode()).hexdigest()
         seen.add(candidate)
         assert "test" in row["hypothesis"]
 

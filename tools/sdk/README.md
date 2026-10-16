@@ -22,9 +22,14 @@ node tools/sdk/tune.mjs
 
 ## 自学成果的使用边界
 
-默认直接读取 `selfstudy/` submodule 中 gfx942 的已有 `skills_out`，不执行自学或重新生成 skill。
+SDK 从冻结的 `evaluation_contract.agent_profile` 注入所选 client 和架构的技能正文，
+不在通用提示词里固定 aiter 或 gfx942。client hook 与外部 manager 的只读入口见
+[client 契约](../../client/README.md#为通用-agent-声明工作流与验证)。规划阶段先读取 guidance，
+按 client skill 准备环境、选择 workload；SDK worker 接收绑定后的单 workload run。
+
+选择 gfx942 时直接读取 `selfstudy/` submodule 中已有的 `skills_out`，不执行自学或重新生成 skill。
 `knowledge/skills/mfma-interleave-gfx942/` 是上游导出的软链接。依赖缺失时报告缺项，
-不由模型运行 pipeline、fit、探针汇编或硬件探测补齐。SDK 提示词保留此约束，也不自动更新 submodule。
+不由模型运行 pipeline、fit、探针汇编或硬件探测补齐，也不自动更新 submodule。
 新 clone 后用 `bash tools/init_selfstudy.sh` 获取固定版本并配置 gfx942 稀疏检出；
 详见 [submodule 接入说明](../../proj/selfstudy-submodule.md)。
 
@@ -52,13 +57,15 @@ Python 使用 `TESTFT_PYTHON`，否则优先 `python3.8`，没有则用 `python3
 
 ```bash
 node tools/sdk/tune.mjs path/to/seed.s \
-  --client poc_kl/fp8_blockscale_gemm --rounds 6 --region loop \
-  -- m=2560 n=2560 k=256
+  --client aiter/hsa/gfx942 --rounds 6 --region loop \
+  -- --manifest path/to/workload.json
 ```
 
 `--client` 选择项目。`--` 后的 token（包括空字符串、空格、重复键、以 `--` 开头的参数）
 通过子进程 argv 原样传给 **init 一次**，随后从 manifest 读取。SDK 不解析 shape 或拼接这些 token 为 shell 字符串。
 默认输出位于 client 的 `tune_out/runs/<run-id>/`；实际路径以 client resolve 返回值为准。
+这里以 aiter 为例，workload manifest 和对应 seed 先按所选 client skill 准备；
+其他 client 使用自己的 SPEC 和透传参数。相对路径形式的 client 参数在仓库根解释。
 
 没有 `--comparison-policy` 时，只筛选并生成未确认报告，不调用 confirm 或 final，不推荐筛选最高分。
 模型可选择已测量的探索父版本，但它不会变成已确认 incumbent。
@@ -67,21 +74,40 @@ node tools/sdk/tune.mjs path/to/seed.s \
 
 ```bash
 node tools/sdk/tune.mjs path/to/seed.s \
-  --client poc_kl/fp8_blockscale_gemm --rounds 6 \
+  --client aiter/hsa/gfx942 --rounds 6 \
   --comparison-policy path/to/chosen-policy.json --eval-calls 88 --final-reserve 16 \
-  -- m=2560 n=2560 k=256
+  -- --manifest path/to/workload.json
 ```
 
 上例预算与 [P0-c 文档的示例策略](../../proj/steps/geak-P0c-paired-validation.md) 匹配，
 不是已校准的 GPU 参数或收益保证。SDK 不提供默认统计策略、阈值或样本数。
 控制器会在 init 时校验策略与预算，并把策略内容冻结进 manifest。
 
-1. original 必须通过筛选，才允许测试其他候选。normalized 的失败不会替换原始参考。
+若 client 声明多个必需指标，confirm/final 对每项独立裁决，全部通过才推荐本 workload；
+缺少任一计时或必需正确性证据时测量无效。目前多指标要求固定 `paired_sign_v1` 策略，
+不接受 sequential policy。aiter 的 HIP graph 与各适配器的 op_test 分布由 aiter client 声明，
+其他 client 可以使用自己的指标。报告分别保留各项结果；整份 `.co` 的关联尺寸验收仍由外层
+manager 按 client skill 执行，SDK 单 run 不代表整份产物可以替换。
+
+1. original 必须返回 `status=measured`，才允许测试其他候选；命令退出码为 0 不代表数值验证通过。
+   normalized 仅在静态检查通过且与 original 的 SHA 不同时筛选，避免重复测量相同字节。
+   normalized 的失败不会替换原始参考；测量本身也不改变探索父版本。
 2. observe 返回 observation_id、base_sha256 和父版本。prepare 校验这些身份并归档实际构建结果。
 3. eval 是筛选；仅显式策略的 confirm 可以推进 incumbent。推进后必须重新 observe。
 4. SDK 模型正常结束后，驱动器读取 status。有策略且仍在 search 阶段时调用一次 final，与 original 比较。
    已完成 final 或正在 finalizing 的运行不重复调用；失败不自动 resume、重试 confirm 或重试 final。
 5. 模型异常、缺 key、鉴权失败或中断时，仅尝试报告已持久化证据，不自动补测。
+
+技能里的环境准备、独立验证、campaign 和容器清理属于外层 manager，单 run worker 不执行这些步骤。
+worker 串行执行控制器操作，契约变化、归档完整性错误或待恢复状态必须停止并报告。
+它根据实际调用耗时为 final 留出时间：`final_eval_reserve` 只预留调用次数，
+`wall_time_limit` 到期后 final 也不能开始新测量；它不强制终止已运行的 client 调用或模型思考。
+worker 汇报要求列出已声明的 workload／配置来源、逐项指标、停止原因和待验收范围，产物路径折叠显示。
+
+驱动器在 SDK 导入、创建或运行期间接收 SIGINT/SIGTERM 都会尝试导出报告。
+中断期间若创建请求稍后完成，仍清理该 agent，且不再向它发送调优任务。
+清理最多等待 8 秒；清理失败或超时会明确报错并跳过自动 final，不把终止状态当作已确认。
+这不保证外部进程已经退出，残留运行或控制器锁仍需显式检查和恢复。
 
 `--region loop` 等具体区域通过提示词固定；`all` / `auto` / `any` 允许跨区重新 observe。
 控制器校验每个 spec 与其 observation 区域一致。模型的 region 使用约定不等于 shell 权限限制。
@@ -92,9 +118,9 @@ node tools/sdk/tune.mjs path/to/seed.s \
 `--search-policy FILE` 将用户选择的 JSON 文件交给 init 校验并冻结，和比较策略相互独立：
 
 ```bash
-node tools/sdk/tune.mjs path/to/seed.s --client poc_kl/fp8_blockscale_gemm \
+node tools/sdk/tune.mjs path/to/seed.s --client aiter/hsa/gfx942 \
   --search-policy path/to/search-policy.json --eval-calls 30 \
-  -- m=2560 n=2560 k=256
+  -- --manifest path/to/workload.json
 ```
 
 搜索策略可包含 `direction_eval_call_limit`、`stagnation_limit`、`profile_call_limit` 等字段，
@@ -104,6 +130,31 @@ profile 默认上限为 0；正整数或用户显式填写的 null 才允许 pro
 null 仅表示不设 profile 专项上限，总 eval 预算、final reserve 和独立探索预留仍有效。
 SDK 不因搜索策略自动扩充 eval 总预算；需要的调用额度应在初始化时明确安排。
 该选项不启用 confirm/final；确认仍必须另传 `--comparison-policy`。
+
+搜索策略还可选择候选生成算法：
+
+```json
+{
+  "candidate_providers": ["generic", "gfx942_repeated_salu_chains", "gfx942_salu_chains", "gfx942_repeated_operand_prefetch"],
+  "candidate_attempt_limit": 96
+}
+```
+
+省略 `candidate_providers` 时，在 init 展开通用生成器及实际 Target 声明的生成器并冻结；
+显式列表必须非空、无重复，名称必须适用于该 Target。`["generic"]` 只用通用局部移动。
+没有架构 hook 的 Target 只启用 generic，不借用其他 ISA 的算法。当前实际 ISA 支持仍为 gfx942。
+`candidate_attempt_limit` 在 1–512 之间，默认 96，约束单次 suggest 的 CPU 提案检查数；
+这些检查不调用 client，也不消耗 GPU 调用额度。生成器轮流提出候选，返回数仍受 `--n` 限制。
+
+gfx942 算法动态识别 RAW/SCC 标量链、匹配的栅栏分隔阶段及加载单元，无固定指令编号、寄存器号
+或展开步长。通用建议分别采样 VALU/SALU，并覆盖整个区域，不再仅检查最前面的匹配指令。
+候选仍经过 propose 和 materialize 检查；成组移动若有跳过成员就整组拒绝。说明见
+[gfx942 搜索技能](../../knowledge/skills/gfx942-scheduling-search/SKILL.md)。
+
+建议包含 `provider`、`details` 和 `candidate_sha256`，保存到该 observation 的 `candidate_generation`。
+prepare 对匹配 spec 自动记录来源并核对构造 SHA；候选方向不能通过改名绕过额度。
+每次 suggest 按已注册候选的实际汇编 SHA 去重，尚未筛选的既有候选可从 status 查找，
+不会作为新候选重新建议。生成器边界不限制模型另提有依据的合法 spec，空池也不代表全局最优。
 
 提示词让模型调用 `suggest RUN --n N --region SEL` 获取小批 CPU 建议，使用返回的
 observation 身份、spec 和 hypothesis 调用 prepare。优先从可用、尚未尝试的独立方向各试少量候选，
@@ -130,10 +181,10 @@ SDK 提示词约定每个 parent revision 最多请求一次可选 profile；无
 没有 `--history-run` 时不扫描历史目录、不调用 history 或 warm-start。
 
 ```bash
-node tools/sdk/tune.mjs path/to/seed.s --client poc_kl/fp8_blockscale_gemm \
-  --history-run client/poc_kl/tune_out/runs/PRIOR_RUN \
+node tools/sdk/tune.mjs path/to/seed.s --client aiter/hsa/gfx942 \
+  --history-run client/aiter/tune_out/runs/PRIOR_RUN \
   --search-policy path/to/search-policy.json \
-  -- m=2560 n=2560 k=256
+  -- --manifest path/to/workload.json
 ```
 
 提示词要求先取得本次 original 的有效筛选，再调用一次 `history RUN HISTORY_DIR [--candidate ID]`。
@@ -221,10 +272,10 @@ final 未运行时 selected/recommendation 均为 null；original 回退不表�
 
 ```bash
 # 随时 CPU 导出；不触发恢复或评测
-python3 tools/tune_run_report.py client/poc_kl/tune_out/runs/RUN_ID
+python3 tools/tune_run_report.py client/aiter/tune_out/runs/RUN_ID
 # 显式查看并恢复中断状态；恢复本身不重跑已占预算的调用
-python3 tools/tune_run.py status client/poc_kl/tune_out/runs/RUN_ID
-python3 tools/tune_run.py resume client/poc_kl/tune_out/runs/RUN_ID
+python3 tools/tune_run.py status client/aiter/tune_out/runs/RUN_ID
+python3 tools/tune_run.py resume client/aiter/tune_out/runs/RUN_ID
 ```
 
 SDK 只创建新 run，不自动续跑旧 run。后续动作按 [P0-c 协议](../../proj/steps/geak-P0c-paired-validation.md)

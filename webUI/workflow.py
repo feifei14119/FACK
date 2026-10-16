@@ -99,6 +99,8 @@ def command(action, p, repo):
                 "--eval-calls", positive(p.get("eval_calls"), 48)]
         if p.get("policy"):
             argv += ["--comparison-policy", file_path(p["policy"], repo, ".json")]
+        if p.get("search_policy"):
+            argv += ["--search-policy", file_path(p["search_policy"], repo, ".json")]
         argv += ["--client", "aiter/hsa/gfx942", "--"] + params
         label = "创建逐 workload 调优任务"
     elif action in {"dispatch_validate", "dispatch_evaluate"}:

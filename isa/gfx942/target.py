@@ -22,6 +22,13 @@ class Gfx942Target:
         self._aliases = aliases or {}
         self._counter_model = Gfx942CounterModel()
 
+    def candidate_providers(self):
+        """Optional CPU candidate generators, shared by every client on this ISA."""
+        from .candidates import salu_chains, repeated_salu_chains, repeated_operand_prefetch
+        return {"gfx942_salu_chains": salu_chains,
+                "gfx942_repeated_salu_chains": repeated_salu_chains,
+                "gfx942_repeated_operand_prefetch": repeated_operand_prefetch}
+
     @classmethod
     def from_program(cls, program) -> "Gfx942Target":
         """Build a target whose alias map is populated from the program's

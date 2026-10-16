@@ -6,6 +6,11 @@
 
 所有 GPU 评测都通过 `--client aiter/hsa/gfx942 -- ...`。输出目录包含：
 
+候选统一来自 `tune_run.py suggest`。campaign 保留生成器的完整 spec、分组细节和 SHA，
+不再维护一套独立的 SALU/访存候选算法；架构生成器及搜索策略见
+[SDK 搜索说明](../../../tools/sdk/README.md#搜索方向停滞与可选-profiling)。
+`mechanisms.json` 记录共享建议及已查询的 MFMA 资料，不表示静态性能预测已获验证。
+
 - `inventory.json`：全部发现的 `.co` 及分类；`progress.json`：状态、简短原因、当前任务和指标。
 - `plan.json`：有实际 adapter 的任务、manifest、shape、seed 和阶段截止时间；`adapter-audit.json`：未适配原因。
 - `kernels/<run-id>/`：命令、stdout/stderr、MFMA 已有导出查询、候选机制、原始筛选、最终决定。

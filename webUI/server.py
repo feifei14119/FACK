@@ -122,6 +122,14 @@ def build_command(action, p):
         argv.append("--results")
         if p.get("model"):
             argv += ["--model", str(p["model"]).strip()]
+        for field, flag, label in (("policy", "--comparison-policy", "比较"),
+                                   ("search_policy", "--search-policy", "搜索")):
+            if p.get(field):
+                policy = str(p[field]).strip()
+                policy = policy if os.path.isabs(policy) else os.path.join(REPO, policy)
+                if not os.path.isfile(policy):
+                    raise ValueError(label + "策略文件不存在")
+                argv += [flag, policy]
         argv += ["--"] + (client_params if client_params is not None else _tokens(p.get("params")))
         env = dict(selected_env)
         if p.get("apikey"):

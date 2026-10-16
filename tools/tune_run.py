@@ -80,8 +80,13 @@ def client_contract(cl, params, loop, kernel, seed_src=""):
     path = str(Path(cl.module.__file__).resolve())
     identity = (cl.identity(seed_src=seed_src, params=params, loop=loop, kernel=kernel)
                 if callable(getattr(cl, "identity", None)) else unavailable_identity())
-    return {"client": cl.spec, "client_file": path, "client_sha256": file_sha256(path),
-            "client_identity": identity, "params": list(params), "loop": loop, "kernel": kernel}
+    contract = {"client": cl.spec, "client_file": path, "client_sha256": file_sha256(path),
+                "client_identity": identity, "params": list(params), "loop": loop, "kernel": kernel}
+    if callable(getattr(cl, "agent_profile", None)):
+        contract["agent_profile"] = cl.agent_profile(seed_src=seed_src, params=params, loop=loop, kernel=kernel)
+        if contract["agent_profile"].get("client_profile_status") == "workload_unbound":
+            raise ValueError("client requires a bound workload and validation contract before run initialization")
+    return contract
 
 
 @contextmanager

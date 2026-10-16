@@ -136,6 +136,34 @@ export function initArgs(opts, seed, policy = null) {
   return args;
 }
 
+export function renderAgentProfile(profile) {
+  if (!profile) return "No client skill profile was supplied; do not infer client or architecture-specific requirements.";
+  const { skills = [], ...contract } = profile;
+  const documents = skills.map((skill) => {
+    if (typeof skill.content !== "string" || sha256(skill.content) !== skill.sha256) {
+      throw new Error(`Client skill snapshot digest mismatch: ${skill.path}`);
+    }
+    return `Selected ${skill.role} skill: ${skill.path}\nSHA256: ${skill.sha256}\n${skill.content}`;
+  });
+  return `FROZEN CLIENT/ARCHITECTURE PROFILE:\n${JSON.stringify(contract, null, 2)}
+The following selected skill snapshots are part of this run's contract. Relative repository paths
+are resolved from the repository root; document links are relative to their original skill path.
+Follow the client workflow and target-specific guidance. Do not substitute another architecture's
+skills when architecture_skill_status is unavailable. Missing declared dependencies must be resolved
+before starting a new run; do not regenerate knowledge or change this run's frozen requirements.
+Every declared metric and required check must be present. Confirmation and final require ALL
+declared metrics to pass separately; no averaging or dropping distributions. A recommendation
+applies only to this workload. Associated-workload validation is a separate client workflow;
+do not claim whole-artifact adoption from this single run.
+Client preparation and cross-workload actions belong outside this frozen single-run worker.
+Report those required follow-up actions to the manager; do not create another run here.
+Skill instructions for setup, standalone validation, campaign management or container cleanup
+describe outer workflows. Inside this worker, use only the controller commands below; do not
+execute those outer steps or stop the shared environment. If preparation is incomplete, stop
+and report the missing prerequisite instead of modifying the frozen workload or its dependencies.
+${documents.join("\n\n")}`;
+}
+
 export function buildPrompt({ python, repo, runDir, opts, manifest }) {
   const cli = (command, ...args) => shellCommand([python, "tools/tune_run.py", command, runDir, ...args]);
   const roaming = ["all", "auto", "any"].includes(opts.region);
@@ -202,12 +230,7 @@ call legacy agent_session.py, invoke a client directly, create another run, or c
 Write proposal JSON files under ${path.join(runDir, "proposals-input")} (create it if needed).
 This shell instruction is an operating convention, not a sandbox security guarantee.
 
-Self-study is disabled in the default tuning workflow. selfstudy/ is the pinned
-gfx_hw_prob submodule, checked out sparsely for gfx942. Read the existing export at
-selfstudy/gfx942/mfma_issue/skills_out/skills/mfma-interleave-gfx942 through
-knowledge/skills/mfma-interleave-gfx942. Never run pipeline, study, fit, hardware
-discovery, or skill regeneration to prepare a tuning run. If the export is missing,
-report the missing dependency; do not generate replacements or update the submodule.
+${renderAgentProfile(manifest.evaluation_contract?.agent_profile)}
 
 Budget: ${JSON.stringify(manifest.budget)}; screening repeats=${manifest.perf_repeats}.
 Frozen search policy: ${JSON.stringify(searchPolicy)}. Do not change this policy or increase its limits.
@@ -217,15 +240,27 @@ Stop on exhaustion. No automatic --repeat or resume; interrupted work needs expl
 ${roaming ? "You may choose any observed region; re-observe before changing regions." : `Tune only region ${JSON.stringify(opts.region)}; include it on every observe.`}
 
 1. Read status: ${cli("status")}. Establish original with ${cli("eval", "original")}.
+   Require batch.status == "measured"; a zero CLI exit code alone does not mean a valid measurement.
    If original is not measured, stop: no replacement baseline or claim of speedup.
-   Screen normalized with ${cli("eval", "normalized")}. Failure keeps original as reference.
+   Inspect state.candidates.normalized.static_ok and its artifact.sha256 in status. Only if its
+   static gate passed and its bytes differ from original, screen it with ${cli("eval", "normalized")}.
+   Otherwise record why normalized was skipped; do not copy original measurements into its state.
+   Normalized failure keeps original as reference. Evaluation never changes the exploration parent.
    Normalization itself may be a confirmation candidate if it improves screening.
+   Separate normalization/repair effects from the scheduling hypothesis: compare a valid normalized
+   screen when available, and use materialized diagnostics before attributing a gain to moved instructions.
    ${historical}
 2. Observe: ${cli("observe", ...region)}. Read facts plus observation_id, base_sha256 and parent_id.
    To generate a small pool of engine-checked directions, use:
    ${cli("suggest", "--n", String(Math.min(6, opts.rounds)), ...region)}
    suggest is CPU-only and returns {observation,suggestions,search}; use THAT returned observation's
    observation_id/base_sha256 with each suggestion's spec and hypothesis. It does not evaluate candidates.
+   The frozen candidate_providers select generic and optional target-specific generators. Returned
+   provider/details describe the current instruction groups; candidate_sha256 identifies materialized
+   bytes. Preserve a generated spec's complete chains/groups and stable direction; prepare records its
+   provenance and verifies the digest. Partial edits are new hypotheses requiring fresh CPU validation.
+   Suggestions exclude already registered artifact hashes. An empty pool is not proof of optimality;
+   use the ledger/current observation for a new justified hypothesis, or stop within the frozen budget.
    Anchored regions expose anchors/slots/fillers: JSON {"kind":"layout","layout":{"0":[IID]}}.
    Anchor-less regions expose dag/tunable/critical/segments/waitcnt_preview:
    JSON {"kind":"order","order":[IID,IID]}; use small partial orders (typically 2-15 IDs).
@@ -247,6 +282,9 @@ ${roaming ? "You may choose any observed region; re-observe before changing regi
    Optional ${cli("annotate", "--file", "ANNOTATION_PATH")} records {text,evidence_refs} as interpretation only.
 4. Screen prepared candidate: ${cli("eval", "CANDIDATE_ID")}. Only measured valid scores are usable.
    Compare screening scores to the measured reference; a high score alone is not confirmation.
+   When validation metrics are declared, inspect every metric and required check in the saved attempts;
+   the screening score is only a ranking signal. Do not spend confirmation calls on a candidate with
+   missing validation evidence or a known regression in another required metric.
 5. ${confirmation}
 
 Re-read status.search before new prepare/eval/profile/warm-start: use direction_eval_calls, profile_calls,
@@ -256,6 +294,13 @@ including suggest, prepare, warm-start, new screen batches and profiles. An elig
 once; then finish so the SDK can perform its configured final. Do not bypass a stop with new direction
 names, repeated eval, another run, or changed policy. Duplicate/no_change and cached batches are not
 fresh independent experiments. A single failed or noisy candidate does not condemn a whole direction.
+Do not issue run mutations or client evaluations concurrently. Each result determines the next action.
+For environment_changed, contract_mismatch, manifest_mismatch, recovery_required, run_closed or an
+integrity failure, stop and report the exact error and run path; do not repair state or retry automatically.
+An exhausted proposal/direction/profile/reuse allowance ends that action, not necessarily all remaining
+actions: inspect status before continuing another eligible direction or a pending confirmation.
+The wall_time_limit deadline also applies to final. Leave time for the complete configured final
+comparison using observed call durations; final_eval_reserve protects calls, not elapsed time.
 
 ${profiling}
 
@@ -270,8 +315,34 @@ provenance/diagnostics, then screen and confirm the resulting candidate through 
 Do not add individual speedups or reuse old instruction IDs. A failed combination retains the current
 selection; revise a fresh observation if mapping is ambiguous.
 End with candidate IDs, region, hypothesis, screening evidence and any actual confirm verdict.
-The report comes from authoritative state; do not claim final recommendation before driver final.
+Include the frozen workload and provenance (dimensions, configuration file/row and source digest when
+declared), each required metric with its unit, remaining validation work and the reason search stopped.
+Use only recorded values; mark missing evidence explicitly. Do not invent dimensions or test methods
+for clients that do not declare them. The report comes from authoritative state; do not claim final
+recommendation before driver final. Keep artifact paths in a collapsed details block in Markdown output.
 `;
+}
+
+/** Wait for late creation before disposal; failure must suppress automatic final. */
+export async function disposeAgent(creation, { timeoutMs = 8000 } = {}) {
+  if (!creation) return;
+  let timer;
+  try {
+    await Promise.race([
+      (async () => {
+        let agent;
+        try { agent = await creation; }
+        catch { return; } // Creation failure is already reported by the driver.
+        if (typeof agent?.[Symbol.asyncDispose] !== "function") {
+          throw new Error("SDK agent has no async disposal method");
+        }
+        await agent[Symbol.asyncDispose]();
+      })(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("SDK cleanup timed out; agent termination is unverified")), timeoutMs);
+      }),
+    ]);
+  } finally { clearTimeout(timer); }
 }
 
 /** Finalize only a normal completed SDK turn. Failure paths export without new GPU work. */

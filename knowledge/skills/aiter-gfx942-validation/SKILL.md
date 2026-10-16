@@ -5,6 +5,9 @@ description: 在 FACK 中准备 gfx942 aiter Docker 环境，从 dispatch CSV �
 
 # aiter gfx942 环境与单算子验证
 
+先按 [aiter 调优入口](../aiter-tuning/SKILL.md) 选择 workload 和必需验证契约。
+本技能补充 gfx942 环境及执行细节，不负责其他 client 或架构。
+
 所有命令在目标机器的 FACK 仓库根执行。先读
 [操作步骤](../../../client/aiter/docs/validation.md)，按当前任务选择环境准备、seed 验证或 op_test 比较。
 环境配置和正式脚本随仓库维护，不能依赖已有 `tune_out/`、某个旧容器或固定机器目录。
@@ -23,7 +26,7 @@ description: 在 FACK 中准备 gfx942 aiter Docker 环境，从 dispatch CSV �
    `tools/eval_candidate.py --client aiter/hsa/gfx942 -- ...` 验证完整输出。回编失败或数值失败时停止调优。
 5. 调优继续用已有 `tools/tune_run.py`，先验证 original；使用用户指定或计划导出的 workload，不擅自修改 MNK/splitK。
    CSV 任务还要求 `dispatch_check.correct=True`；保留每个 workload ID，不按 `.co` 去重跳过其他尺寸。
-6. 要求 op_test 时使用与目标匹配的 manifest。CSV 导出的 manifest 已开启 GEMM op_test，不替换 driver。
+6. 正式 agent 调优必须使用带 op_test 且与目标匹配的 manifest。CSV 导出的 manifest 已开启 GEMM op_test，不替换 driver。
    默认 blockscale 示例才使用 `client/aiter/hsa/gfx942/optest_manifest.json`。检查所有完整输出比较。
 7. 比较两个确定的 `.s` 用 `client/aiter/compare.py ... --client aiter/hsa/gfx942 -- ...`。
    事先指定配对次数和收益门槛，分别报告 op_test profiler 与 HIP graph 的结果。

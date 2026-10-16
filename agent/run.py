@@ -21,7 +21,7 @@ from contextlib import contextmanager
 
 from agent.artifacts import save_assembly
 from agent.diagnostics import diagnose_candidate
-from agent.directions import validate_search_policy
+from agent.directions import validate_search_policy, resolve_providers
 from agent.search_control import (SearchControllerMixin, search_status, check_search_open,
                                   check_navigation_budget, guidance, check_reuse_proposal, charge_reuse_proposal,
                                   check_comparison_navigation)
@@ -32,6 +32,7 @@ from agent.session import AgentSession
 from harness.comparison import (SEQUENTIAL_METHOD, assess_look, assess_pairs, look_sizes,
                                 pair_order, planned_pairs, validate_policy)
 from harness.measurement import file_sha256, measure_screen, snapshot_result
+from harness.validation import validate_contract, evidence as validation_evidence, combined_verdict, assess_methods
 from search import driver
 
 REPO = Path(__file__).resolve().parent.parent
@@ -122,6 +123,7 @@ class RunController(SearchControllerMixin, ReplayControllerMixin, HistoryControl
         if comparison is not None and final_eval_reserve < 2 * planned_pairs(comparison, "final"):
             raise ValueError("final reserve must cover both sides of the complete final comparison")
         search_policy = validate_search_policy(search_policy)
+        search_policy["candidate_providers"] = resolve_providers(seed_src, search_policy["candidate_providers"])
         if search_policy["independent_eval_reserve"] > eval_call_limit - final_eval_reserve:
             raise ValueError("independent reserve exceeds the non-final evaluation budget")
         policy = {"opt_level": 1, "protect_prefetch": bool(protect_prefetch),
@@ -130,6 +132,9 @@ class RunController(SearchControllerMixin, ReplayControllerMixin, HistoryControl
         normalized, ok = driver.build_candidate(seed_src, normalized_spec)
         diagnostics = diagnose_candidate(seed_src, seed_src, normalized, spec=normalized_spec)
         ok = ok and diagnostics["ok_vs_original"]
+        validation = validate_contract(contract.get("agent_profile", {}).get("validation"))
+        if validation and len(validation["metrics"]) > 1 and comparison and comparison["method"] == SEQUENTIAL_METHOD:
+            raise ValueError("multiple client metrics currently require a fixed paired_sign_v1 policy")
         directory = Path(directory).resolve()
         directory.mkdir(parents=True, exist_ok=False)
         manifest = {"schema_version": SCHEMA_VERSION, "run_id": directory.name,
@@ -316,6 +321,14 @@ class RunController(SearchControllerMixin, ReplayControllerMixin, HistoryControl
             proposal["intent_id"] = _digest({"base_sha256": base_sha256, "spec": dict(spec, region=obs["region"]),
                                               "region": obs["region"], "build_policy": manifest["build_policy"],
                                               "evaluation_contract": manifest["evaluation_contract"]})
+            generated = next((item for item in obs.get("candidate_generation", {}).get("suggestions", [])
+                              if item["spec"] == dict(spec, region=obs["region"])), None)
+            if generated:
+                if hypothesis and "direction" in hypothesis and hypothesis["direction"] != generated["direction"]:
+                    raise RunError("invalid_spec", "generated suggestion direction cannot be relabelled")
+                proposal["hypothesis"]["direction"] = generated["direction"]
+                proposal["candidate_generation"] = {key: copy.deepcopy(generated[key]) for key in
+                    ("provider", "candidate_sha256", "details") if key in generated}
             source = self._source(state, parent)
             session = AgentSession(source, None, region=obs["region"], out_store=str(self.directory),
                                    protect_prefetch=manifest["build_policy"]["protect_prefetch"])
@@ -336,6 +349,8 @@ class RunController(SearchControllerMixin, ReplayControllerMixin, HistoryControl
             proposal["diagnostics"] = diagnostics
             if not ok or not diagnostics["ok_vs_original"]:
                 raise RunError("verify_failed", "materialized candidate failed static verification")
+            if generated and hashlib.sha256(text.encode("utf-8")).hexdigest() != generated["candidate_sha256"]:
+                raise RunError("verify_failed", "materialized source differs from the generated suggestion")
             artifact = save_assembly(text, str(self.directory))
             artifact["path"] = os.path.relpath(artifact["path"], str(self.directory))
             matches = [c["id"] for c in state["candidates"].values()
@@ -346,6 +361,8 @@ class RunController(SearchControllerMixin, ReplayControllerMixin, HistoryControl
                     "id": candidate_id, "artifact": artifact, "parent_id": parent,
                     "spec": build_spec, "static_ok": True, "diagnostics": diagnostics,
                     "direction": proposal["hypothesis"]["direction"], "reuse": bool(reuse)}
+                if generated:
+                    state["candidates"][candidate_id]["candidate_generation"] = copy.deepcopy(proposal["candidate_generation"])
             if candidate_id != "original":
                 candidate = state["candidates"][candidate_id]
                 if candidate.get("reuse") and not proposal["reuse_charged"]:
@@ -520,6 +537,16 @@ class RunController(SearchControllerMixin, ReplayControllerMixin, HistoryControl
                 controller._check_identity(manifest)
                 if callable(validator):
                     validator()
+                validation = manifest["evaluation_contract"].get("agent_profile", {}).get("validation")
+                if validation and result.compiled is True and result.correct is True:
+                    try:
+                        values, scores = validation_evidence(attempt["result"], validation)
+                        attempt["validation"] = {"status": "passed", "metrics": values, "scores": scores}
+                    except ValueError as exc:
+                        attempt["validation"] = {"status": "failed", "error": str(exc)}
+                        controller._save(state)
+                        raise
+                    controller._save(state)
                 return result
 
         result = measure_screen(RecordingEvaluator(), str(path), repeats,
@@ -548,6 +575,7 @@ class RunController(SearchControllerMixin, ReplayControllerMixin, HistoryControl
     def _compare(self, manifest, state, candidate_id, reference_id, evaluator, stage):
         """New samples only; incomplete comparisons cannot promote any version."""
         policy = manifest["comparison_policy"]
+        validation = manifest["evaluation_contract"].get("agent_profile", {}).get("validation")
         comparison_id = uuid.uuid4().hex
         comparison = {
             "id": comparison_id, "stage": stage, "status": "running",
@@ -580,6 +608,11 @@ class RunController(SearchControllerMixin, ReplayControllerMixin, HistoryControl
                                       failure_status=batch["status"], finished_at=time.time())
                     return comparison  # caller atomically saves verdict and final/parent state
                 pair["scores"][role] = batch["measurement"]["tflops"]
+                if validation:
+                    values, scores = validation_evidence(batch["measurement"]["samples"][0]["result"], validation)
+                    pair.setdefault("metric_values", {})[role] = values
+                    pair.setdefault("metric_scores", {})[role] = scores
+                    pair["scores"][role] = scores[validation["primary_metric"]]
                 self._save(state)
             done = pair["index"] + 1
             if policy["method"] == SEQUENTIAL_METHOD and done in looks:
@@ -592,6 +625,11 @@ class RunController(SearchControllerMixin, ReplayControllerMixin, HistoryControl
                     break
         comparison["analysis"] = assess_pairs([p["scores"] for p in comparison["pairs"]], policy, stage)
         comparison.update(status="completed", verdict=comparison["analysis"]["verdict"], finished_at=time.time())
+        if validation:
+            methods = assess_methods(comparison["pairs"], validation, policy, stage)
+            comparison.update(methods=methods, verdict=combined_verdict(methods),
+                              recommendation_scope=validation["recommendation_scope"],
+                              associated_workloads=validation["associated_workloads"])
         return comparison
 
     def confirm(self, candidate_id, evaluator, *, evaluation_contract=None):
@@ -646,6 +684,11 @@ class RunController(SearchControllerMixin, ReplayControllerMixin, HistoryControl
             "reason": reason or comparison["verdict"], "finished_at": time.time(),
             "original_screen_status": original["status"] if original else "not_measured",
             "scope": "configured_protocol_on_client_reports; loaded_code_object_and_hardware_environment_unverified"}
+        if comparison and "methods" in comparison:
+            state["final_result"].update(methods=copy.deepcopy(comparison["methods"]),
+                                         recommendation_scope=comparison["recommendation_scope"],
+                                         associated_workloads=comparison["associated_workloads"],
+                                         artifact_adoption="not_assessed")
 
     def finalize(self, evaluator, *, evaluation_contract=None):
         """Freeze one choice and finish the run, using only new final samples."""

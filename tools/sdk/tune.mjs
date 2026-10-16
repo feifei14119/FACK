@@ -4,7 +4,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { USAGE, parseArgs, initArgs, buildPrompt, finishRun, prepareSeed,
-  recordProvenance, transcriptPaths } from "./run_workflow.mjs";
+  recordProvenance, transcriptPaths, disposeAgent } from "./run_workflow.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..", "..");
@@ -108,11 +108,15 @@ function renderEvent(ev) {
   }
 }
 
-let agent, runDir;
+let agent, agentCreation, runDir;
 let successful = false;
 let stopping = false;
+let closing = false;
 let interrupt;
 const interrupted = new Promise((_, reject) => { interrupt = reject; });
+// Signals may arrive while dynamic import is pending, before Promise.race has
+// subscribed. Keep the rejection handled without consuming it for the race.
+interrupted.catch(() => {});
 const handlers = Object.fromEntries(["SIGINT", "SIGTERM"].map((signal) => [signal, () => {
   if (stopping) return;
   stopping = true;
@@ -148,26 +152,32 @@ try {
   const prompt = buildPrompt({ python: PY, repo: REPO, runDir, opts, manifest: initialized.manifest });
   // Dynamic import lets --help, init failure, and no-key reporting work without the SDK package.
   const { Agent } = await import("@cursor/sdk");
+  if (stopping) await interrupted;
   await Promise.race([interrupted, (async () => {
-    agent = await Agent.create({ apiKey, model: modelSel, local: { cwd: REPO } });
+    agentCreation = Agent.create({ apiKey, model: modelSel, local: { cwd: REPO } });
+    agent = await agentCreation;
+    if (stopping || closing) return;
     rawLine({ ts: Date.now(), kind: "input_prompt", agentId: agent.agentId, runDir, model, prompt });
     mdLine(`# tune transcript\n- persistent run: ${runDir}\n- agent: ${agent.agentId}\n- model: ${model}\n\n## 初始提示词\n\`\`\`\n${prompt}\n\`\`\``);
     const run = await agent.send(prompt);
+    if (stopping || closing) return;
     console.error(`[tune] agent=${agent.agentId} sdk_run=${run.id}`);
     rawLine({ ts: Date.now(), kind: "run_started", runId: run.id });
     for await (const event of run.stream()) {
+      if (stopping || closing) return;
       rawLine({ ts: Date.now(), kind: "event", event });
       renderEvent(event);
     }
     _flushPending();
     const result = await run.wait();
+    if (stopping || closing) return;
     process.stdout.write("\n");
     rawLine({ ts: Date.now(), kind: "result", status: result.status, id: result.id });
     try {
       if (run.supports?.("conversation")) rawLine({ ts: Date.now(), kind: "conversation", conversation: await run.conversation() });
     } catch (error) { rawLine({ ts: Date.now(), kind: "conversation_error", error: error.message }); }
-    successful = result.status === "finished";
-    if (!successful) process.exitCode = 2;
+    successful = result.status === "finished" && !stopping && !closing;
+    if (!successful) process.exitCode ||= 2;
     console.error(`[tune] SDK status: ${result.status}`);
   })()]);
 } catch (error) {
@@ -177,12 +187,15 @@ try {
 } finally {
   // Stop the SDK before reading the run. A live controller lock may still reject
   // reporting after an interrupt; leave it pending rather than guessing recovery.
-  let timer;
-  await Promise.race([
-    (async () => { try { await agent?.[Symbol.asyncDispose]?.(); } catch { /* best effort */ } })(),
-    new Promise((resolve) => { timer = setTimeout(resolve, 8000); }),
-  ]);
-  clearTimeout(timer);
+  closing = true;
+  try { await disposeAgent(agentCreation); }
+  catch (error) {
+    successful = false;
+    process.exitCode ||= 3;
+    console.error(`[tune] SDK cleanup: ${error.message}; skipping automatic final`);
+    rawLine({ ts: Date.now(), kind: "cleanup_error", error: error.message });
+  }
+  _flushPending();
   if (runDir) {
     const reportArgs = [];
     if (opts["report-dir"]) reportArgs.push("--out", path.resolve(opts["report-dir"]));

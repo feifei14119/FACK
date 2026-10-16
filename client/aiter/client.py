@@ -14,6 +14,7 @@ from client.aiter.common import HERE, UPSTREAM, options, source_target
 from harness.evaluator import EvalResult
 from harness.evidence import BuildEvidence, collect_identity
 from harness import toolchain
+from client.aiter.agent_profile import agent_profile, result_evidence
 
 
 def identity(ctx):
@@ -22,6 +23,7 @@ def identity(ctx):
         "manifest": opts.manifest, "driver": driver,
         "client": HERE / "client.py", "runner": HERE / "runner.py",
         "configuration": HERE / "common.py",
+        "agent_profile": HERE / "agent_profile.py",
         "original_co": UPSTREAM / "hsa" / data["arch"] / data["co"],
         "gitmodules": HERE.parent.parent / ".gitmodules",
         "python": shutil.which(opts.python),
@@ -199,6 +201,12 @@ class AiterEvaluator:
                 result.detail["evidence_error"] = "source/artifact/declared inputs changed or build incomplete"
             if with_counters:
                 result.detail["counter_error"] = "aiter client does not implement hardware counters yet"
+            if "runner" in result.detail:
+                try:
+                    result.detail["validation"] = result_evidence(config, result.detail["runner"], data)
+                except (ValueError, KeyError, TypeError) as exc:
+                    result.detail["validation_error"] = str(exc)
+                    result.correct = result.time_us = result.tflops = None
             # Preserve the client verdict after build/identity checks, so the
             # UI never mistakes a raw runner success for an accepted evaluation.
             summary = work / "evaluation.json"

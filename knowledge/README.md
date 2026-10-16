@@ -7,6 +7,7 @@
 ```
 knowledge/
   README.md          本文件：格式、分类和晋升流程
+  architectures.json  目标 gfx 到架构技能的映射；不代表新增 ISA 支持
   skills/            给 Agent 读的经验（SKILL.md 格式），每个主题一个目录
     <name>/SKILL.md  必需；可附 rules.md / examples.md / extending.md 等
   engine/            给引擎读的结构化知识（agent/knowledge.py 的 DEFAULT_STORE）
@@ -20,8 +21,14 @@ knowledge/
 `selfstudy/gfx942/mfma_issue/skills_out/skills/mfma-interleave-gfx942/` 的相对软链接。
 直接引用已锁定的上游导出，不复制、重新生成或手改其中的内容。
 
-`skills/aiter-gfx942-validation/` 保存经用户同意整理的 aiter 操作流程，链接 `client/aiter/` 中维护的
+`skills/aiter-tuning/` 是 aiter 的通用调优入口，规定 workload 选择、必需验证和关联尺寸验收。
+`skills/gfx942-scheduling-search/` 说明按架构选择 SALU 链与重复阶段候选生成器，供任意 gfx942 client 共用。
+`skills/aiter-gfx942-validation/` 保存经用户同意整理的 gfx942 aiter 操作流程，链接 `client/aiter/` 中维护的
 Docker、op_test 脚本与验证记录。操作经验不作为引擎的指令调度先验；新实验输出继续保留在 client 的 `tune_out/`。
+
+client 用可选 `agent_profile(ctx)` 声明自己的技能和验证要求，通用层再按
+`architectures.json` 加入架构技能。SDK 注入冻结的正文与 SHA；外部 agent 通过
+`python3 -m client guidance SPEC` 获取同样的声明。接口见 [client/README.md](../client/README.md)。
 
 ## skills/：给 Agent 读的经验
 

@@ -25,17 +25,19 @@ def target(data, client_name):
     recorded = data.get("target") or {}
     spec = recorded.get("client") or contract.get("client") or data.get("client") or client_name
     resources = (contract.get("client_identity") or {}).get("resources") or {}
+    profile = contract.get("agent_profile") or {}
+    workload = profile.get("workload") or {}
     original = resources.get("original_co") or {}
     provenance = (data.get("input_provenance") or {}).get("source") or {}
-    co = recorded.get("co") or original.get("path") or provenance.get("path")
+    co = recorded.get("co") or original.get("path") or workload.get("co") or provenance.get("path")
     if co and not str(co).endswith(".co"):
         co = None
-    arch = recorded.get("gfx") or (data.get("device") or {}).get("arch")
+    arch = recorded.get("gfx") or profile.get("arch") or (data.get("device") or {}).get("arch")
     if not arch:
         match = re.search(r"(?:^|[/ :\-])(gfx[0-9a-f]+)(?:$|[/ :])", str(co or "") + "/" + spec)
         arch = match[1] if match else None
     return {"client": spec, "gfx": arch, "co": co,
-            "symbol": recorded.get("symbol") or contract.get("kernel")}
+            "symbol": recorded.get("symbol") or workload.get("symbol") or contract.get("kernel")}
 
 
 def metric(label, baseline, candidate, analysis=None, unit="µs"):
@@ -85,7 +87,12 @@ def run_result(directory, repo, client_name):
     row["selected"] = (data.get("selected") or {}).get("id")
     comparison = data["comparisons"].get(final.get("comparison_id")) or {}
     row["candidate"] = comparison.get("candidate_id")
-    if comparison.get("status") == "completed" and comparison.get("analysis"):
+    if comparison.get("status") == "completed" and comparison.get("methods"):
+        for name, values in comparison["methods"].items():
+            row["metrics"].append(metric("最终配对 · " + name, values.get("reference_median"),
+                                         values.get("candidate_median"), values, values["unit"]))
+        row["notes"].append("按 client 声明的全部指标分别裁决；推荐仅适用于当前 workload，整份产物采用尚未评估。")
+    elif comparison.get("status") == "completed" and comparison.get("analysis"):
         pairs = comparison["pairs"]
         throughput = row["target"]["client"].split("/")[0] in ("aiter", "poc_kl")
         row["metrics"].append(metric("最终配对 · client score",

@@ -115,13 +115,16 @@ class SearchControllerMixin:
             if type(n) is not int or not 0 <= n <= MAX_SUGGESTIONS:
                 raise ValueError("suggestion count must be between 0 and 32")
             obs = self._observe(manifest, state, region)
-            choices = suggestions(self._source(state, obs["parent_id"]), obs["region"], manifest["build_policy"],
-                                  n=MAX_SUGGESTIONS if n else 0)
             usage = search_status(manifest, state)
             limit = manifest["search_policy"]["direction_eval_call_limit"]
-            if limit is not None:
-                choices = [c for c in choices if usage["direction_eval_calls"].get(c["direction"], 0)
-                           + manifest["perf_repeats"] <= limit]
+            excluded = [name for name, calls in usage["direction_eval_calls"].items()
+                        if limit is not None and calls + manifest["perf_repeats"] > limit]
+            policy = manifest["search_policy"]
+            choices = [] if limit is not None and limit < manifest["perf_repeats"] else suggestions(
+                self._source(state, obs["parent_id"]), obs["region"], manifest["build_policy"],
+                n=MAX_SUGGESTIONS if n else 0, providers=policy.get("candidate_providers", ["generic"]),
+                attempt_limit=policy.get("candidate_attempt_limit", 96), excluded_directions=excluded,
+                excluded_sha256=[c["artifact"]["sha256"] for c in state["candidates"].values()])
             # Untried directions first; never infer a direction-wide regression
             # from a failed candidate or a noisy score.
             choices.sort(key=lambda c: usage["direction_eval_calls"].get(c["direction"], 0))
@@ -131,7 +134,13 @@ class SearchControllerMixin:
                                       "expected_observable": "improved client score; profile can separately test stall explanation",
                                       "direction": item["direction"], "source": "observation",
                                       "evidence_refs": [{"kind": "observation", "id": obs["observation_id"]}]}
+            state["observations"][obs["observation_id"]]["candidate_generation"] = {
+                "providers": policy.get("candidate_providers", ["generic"]),
+                "attempt_limit": policy.get("candidate_attempt_limit", 96),
+                "suggestions": copy.deepcopy(choices)}
+            self._save(state)
             return {"observation": obs, "suggestions": choices, "search": usage,
+                    "candidate_providers": policy.get("candidate_providers", ["generic"]),
                     "scope": "CPU intent suggestions; require prepare, screen and independent confirmation"}
 
     def profile(self, candidate_id, evaluator, *, evaluation_contract=None):

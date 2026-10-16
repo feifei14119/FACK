@@ -34,7 +34,7 @@ client/
 独立持久化入口 `tools/tune_run.py init SEED --client SPEC ... -- PARAMS` 在初始化时冻结 SPEC 和
 透传参数，后续 `eval RUN CANDIDATE` 从 manifest 读取，不重复接收 `--client` 或测试参数。
 它检查 `client.py` 摘要，在 client 调用前扣预算并逐次保存结果；原始 baseline 必须先通过筛选。
-用法和当前限制见 [P0-b 记录](../proj/steps/geak-P0b-persistent-run.md)，默认 SDK 流程暂未迁移。
+用法和当前限制见 [P0-b 记录](../proj/steps/geak-P0b-persistent-run.md)；默认 SDK 已使用这个持久化入口。
 后续 [P0-c](../proj/steps/geak-P0c-paired-validation.md) 增加显式配置的 `confirm` / `final`：
 每个配对侧都会使用新工作 `.s` 和新 evaluator 对象，但 client 仍须保证每次构建/装载所给候选。
 新对象不能替代 `.co` 装载证明，协议通过也不意味着硬件环境与统计假设已获验证。
@@ -46,6 +46,9 @@ def make_evaluator(ctx):          # 必须
     """返回一个 Evaluator：至少实现 evaluate(s_path, with_counters=False) -> EvalResult"""
 
 def describe(ctx):                # 可选：一句话说明这个 case 测什么、参数什么意思
+    ...
+
+def agent_profile(ctx):           # 可选、只读：技能、workload 和必需验证
     ...
 ```
 
@@ -72,6 +75,75 @@ def describe(ctx):                # 可选：一句话说明这个 case 测什�
 client 必须保证**评测前把候选 `.s` 装进被测程序**（例如汇编成 exe 加载的 `.co`），
 并且多次评测之间互不干扰。引擎不关心这些产物放在哪里，但约定贴着 kernel 的运行产物
 （`.co`、`att/`、`*.hex`）放在 case 目录里，其余输出放在 `out_dir`。
+
+## 为通用 agent 声明工作流与验证
+
+可选的 `agent_profile(ctx)` 将项目经验和硬性验收分开声明。它只读文件，不启动 evaluator、
+编译或 GPU。外部 manager 与 SDK 使用同一个入口：
+
+```bash
+# 准备环境与选择 workload 前，读取规划技能
+python3 -m client guidance aiter/hsa/gfx942
+# 已选择 workload 后，读取实际技能与必需验证；仍不执行 GPU
+python3 -m client guidance aiter/hsa/gfx942 --seed path/to/seed.s -- --manifest path/to/workload.json
+```
+
+client hook 可返回以下字段，均可省略：
+
+```python
+return {
+    "arch": "gfx942",  # 必须与 seed 和显式 --arch 一致
+    "skills": ["knowledge/skills/my-project-tuning/SKILL.md"],
+    "workload": {"inputs": {"size": 1024}},  # 项目自己的参数与来源
+    "instructions": ["先验证原始 seed；按所选 workload 比较"],
+    "validation": {
+        "metrics": {"benchmark": {"unit": "us", "direction": "lower"}},
+        "primary_metric": "benchmark",
+        "required_checks": ["reference_output"],
+        "recommendation_scope": "workload",
+        "associated_workloads": "not_applicable",
+    },
+}
+```
+
+尚未绑定 workload 时可以返回 `requires_workload: True`，省略 validation；规划入口仍返回技能，
+但不能初始化调优 run。这样新环境可以先按 skill 准备依赖、生成 workload，再绑定严格契约。
+aiter 已使用此机制；通用层不解析 CSV、MNK、HIP graph 或 op_test。
+
+`knowledge/architectures.json` 将目标 gfx 映射到架构技能列表。目标从 seed、client 声明或
+guidance 的显式 `--arch` 获取，冲突报错；没有登记的架构标记 unavailable，不借用 gfx942 技能。
+声明的技能文件必须存在，路径相对仓库根。增加此映射不代表引擎新增了 ISA 支持；当前仍为 gfx942。
+
+run 将所选技能的路径、正文、SHA256，以及 workload 和验证要求冻结到
+`manifest.evaluation_contract.agent_profile`。SDK 自动将正文注入提示词；外部 manager
+可以读取相同的 guidance 输出。每次评测前后重新比较契约，技能或要求发生漂移时停止评测。
+环境准备、多 workload 的任务编排和关联尺寸验收由外层 manager 按 client skill 完成；
+SDK worker 只执行本次已冻结 workload 的单 run。
+
+声明 validation 后，每次 client 评测在 `EvalResult.detail` 中提供规范化证据，例如：
+
+```python
+{"validation": {
+    "metrics": {"benchmark": 12.3},
+    "checks": {"reference_output": True},
+}}
+```
+
+指标必须与声明完全一致、为正有限数，所有必需检查必须为 `True`。缺项会使本次测量无效，
+原始结果仍保存并计费。`tflops` 仍用于筛选；confirm/final 使用声明指标，逐项执行同一冻结策略，
+只有全部 `confirmed_gain` 才推荐当前 workload。`lower` 指标转换成倒数参与比较；报告保留原始单位。
+多指标目前只支持固定样本 `paired_sign_v1`，不支持 sequential policy，初始化时明确拒绝。
+`associated_workloads: required_for_artifact_adoption` 表示采用整份产物前还需要 client 的关联验证；
+单 run 记录 `artifact_adoption: not_assessed`，不会自动完成跨尺寸验收。
+
+没有 hook 或没有 validation 的 client 保留原有标量评分流程，不需要 CSV、op_test 或 HIP graph。
+新增 client 的技能按根 `AGENTS.md` 登记；既有 `identity(ctx)` 继续负责测试资源身份。
+
+指令调度候选生成由通用引擎和 ISA Target 提供，与 client 验证声明分开维护。
+可选 `Target.candidate_providers()` 返回 `{稳定名称: generator}`；生成函数接收
+`(editor, anchors, region)`，只产生 `spec`、`direction`、`hypothesis` 和可选 `details`。
+它不能执行评测或修改 editor，合法性与候选构造仍由公共路径处理。使用 `--search-policy`
+选择生成器，默认按实际架构展开；配置和记录格式见 [SDK 搜索策略](../tools/sdk/README.md#搜索方向停滞与可选-profiling)。
 
 ## 可复用的积木
 
@@ -103,7 +175,7 @@ client 必须保证**评测前把候选 `.s` 装进被测程序**（例如汇编
 | `tune_shaders/` | 每次 commit 的候选 `.s` 存档 |
 | `runs/<run-id>/` | 默认 SDK / tune_run 的 manifest、权威状态、不可变汇编、工作批次及 transcript |
 | `runs/<run-id>/report/` | 从状态导出的 JSON/Markdown、筛选/确认/final 分层副本；最终前没有 selected.s |
-| `sdk-inputs/<run-id>/attempt-*/` | SDK 初始化前的原始输入快照与 .co 转换产物 |
+| `sdk-inputs/<run-id>/attempt-*/` | SDK 初始化前的原始 `.s` 输入快照 |
 | `tune_result/` | `tools/tune_summarize.py` 的汇总和最佳 kernel |
 | `skills/` | 在线归纳的候选 skill（人工审核后再手工拷进 `knowledge/engine/skills/`） |
 | `<kernel>_<region>_dag.jsonl` | `observe --compact` 的完整 DAG 旁路文件 |
