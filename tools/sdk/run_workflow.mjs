@@ -320,6 +320,9 @@ declared), each required metric with its unit, remaining validation work and the
 Use only recorded values; mark missing evidence explicitly. Do not invent dimensions or test methods
 for clients that do not declare them. The report comes from authoritative state; do not claim final
 recommendation before driver final. Keep artifact paths in a collapsed details block in Markdown output.
+${manifest.evaluation_contract?.agent_profile?.publication
+    ? "The frozen client declares automatic result publication. After a successful worker session, the SDK driver will publish only a final recommendation, append the result and commit/push it. Do not export publication files, edit the repository README or run Git mutations yourself; publication failure must not trigger more tuning."
+    : "This client has not declared automatic result publication."}
 `;
 }
 
@@ -348,10 +351,12 @@ export async function disposeAgent(creation, { timeoutMs = 8000 } = {}) {
 /** Finalize only a normal completed SDK turn. Failure paths export without new GPU work. */
 export function finishRun({ invoke, runDir, successful, reportArgs = [] }) {
   const errors = [];
-  let finalResult = null;
+  let finalResult = null, publication = null, publicationEnabled = false;
   try {
     if (successful) {
       const status = invoke(["tools/tune_run.py", "status", runDir]);
+      finalResult = status.state.final_result;
+      publicationEnabled = status.manifest.evaluation_contract?.agent_profile?.publication?.mode === "git_commit_push";
       if (status.manifest.comparison_policy && status.state.phase === "search" && !status.state.final_result) {
         // The controller checks pending attempts and returns a structured error;
         // never recover or retry a failed final here.
@@ -362,7 +367,11 @@ export function finishRun({ invoke, runDir, successful, reportArgs = [] }) {
   let report = null;
   try { report = invoke(["tools/tune_run_report.py", runDir, ...reportArgs]); }
   catch (error) { errors.push(`report: ${error.message}`); }
-  return { finalResult, report, errors };
+  if (successful && !errors.length && report && publicationEnabled && finalResult?.status === "final_recommended") {
+    try { publication = invoke(["tools/publish_run.py", runDir]); }
+    catch (error) { errors.push(`publication: ${error.message}`); }
+  }
+  return { finalResult, report, publication, errors };
 }
 
 /** Preserve the assembly source bytes in a fresh initialization attempt. */

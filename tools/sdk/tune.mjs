@@ -202,6 +202,7 @@ try {
     if (opts["results-path"]) reportArgs.push("--json-path", path.resolve(opts["results-path"]));
     const result = finishRun({ invoke, runDir, successful: successful && !stopping, reportArgs });
     if (result.report) console.error(`[tune] report: ${result.report.markdown_path}`);
+    if (result.publication) console.error(`[tune] publication: ${JSON.stringify(result.publication)}`);
     for (const error of result.errors) console.error(`[tune] ${error}`);
     if (result.errors.length) process.exitCode ||= 3;
   }

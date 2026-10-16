@@ -34,7 +34,7 @@ def compose(client, ctx, arch=None):
     if hook is not None and not callable(hook):
         raise ValueError("client agent_profile must be callable")
     declaration = hook(ctx) if hook else {}
-    if not isinstance(declaration, dict) or set(declaration) - {"arch", "skills", "validation", "workload", "instructions", "requires_workload"}:
+    if not isinstance(declaration, dict) or set(declaration) - {"arch", "skills", "validation", "workload", "instructions", "requires_workload", "publication"}:
         raise ValueError("invalid client agent_profile declaration")
     candidates = [x for x in (arch, source_arch(ctx.seed_src), declaration.get("arch")) if x is not None]
     if any(not isinstance(x, str) or not re.fullmatch(r"gfx[0-9a-f]+", x) for x in candidates):
@@ -53,6 +53,15 @@ def compose(client, ctx, arch=None):
         raise ValueError("requires_workload must be a boolean")
     if declaration.get("workload") is not None and not isinstance(declaration["workload"], dict):
         raise ValueError("client workload must be an object")
+    publication = declaration.get("publication")
+    if publication is not None:
+        if (not isinstance(publication, dict) or set(publication) != {"mode", "output_dir", "readme"}
+                or publication["mode"] != "git_commit_push" or publication["readme"] != "README.md"
+                or not isinstance(publication["output_dir"], str)
+                or not publication["output_dir"].startswith("client/" + client.name + "/")
+                or ".." in Path(publication["output_dir"]).parts
+                or not callable(getattr(client.module, "publication_candidate", None))):
+            raise ValueError("invalid client publication declaration or missing publication_candidate hook")
     if not isinstance(registry, dict) or any(
             not isinstance(v, list) or any(not isinstance(p, str) for p in v) for v in registry.values()):
         raise ValueError("architecture registry must map targets to lists of skill paths")
@@ -62,4 +71,5 @@ def compose(client, ctx, arch=None):
             "client_profile_status": ("workload_unbound" if declaration.get("requires_workload") else "declared") if hook else "legacy_score_only",
             "architecture_skill_status": "available" if selected in registry else "unavailable",
             "skills": skills, "validation": validate_contract(declaration.get("validation")),
-            "workload": declaration.get("workload"), "instructions": declaration.get("instructions", [])}
+            "workload": declaration.get("workload"), "instructions": declaration.get("instructions", []),
+            **({"publication": publication} if publication is not None else {})}

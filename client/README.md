@@ -50,6 +50,9 @@ def describe(ctx):                # 可选：一句话说明这个 case 测什�
 
 def agent_profile(ctx):           # 可选、只读：技能、workload 和必需验证
     ...
+
+def publication_candidate(report): # 可选、只读：定位 final 实测产物；不编译、评测或提交 Git
+    ...
 ```
 
 `ctx`（`client.ClientContext`）提供：
@@ -138,6 +141,15 @@ SDK worker 只执行本次已冻结 workload 的单 run。
 
 没有 hook 或没有 validation 的 client 保留原有标量评分流程，不需要 CSV、op_test 或 HIP graph。
 新增 client 的技能按根 `AGENTS.md` 登记；既有 `identity(ctx)` 继续负责测试资源身份。
+
+需要自动交付的 client 可在 profile 额外声明
+`publication={"mode":"git_commit_push","output_dir":"client/<名>/co_out","readme":"README.md"}`，
+并提供 `publication_candidate(report)`。hook 返回 `relative_path`、实测 `code_object` 字节、
+`co_sha256` 和 `original_co_sha256`；可选 `display_inputs` 指定表格展示的尺寸字段，完整输入仍保存到记录。
+二进制与原版相同则返回 None。输出目录必须在本 client 下。
+SDK 只在正常结束、final 推荐且报告成功后调用通用 `tools/publish_run.py`；它重算确认／final
+统计和必需指标，client hook 校验实际产物来源，之后固定程序导出、追加 README、commit/push。
+没有声明的 client 不执行发布。aiter 的产物布局、记录和失败重试见 SDK 文档。
 
 指令调度候选生成由通用引擎和 ISA Target 提供，与 client 验证声明分开维护。
 可选 `Target.candidate_providers()` 返回 `{稳定名称: generator}`；生成函数接收

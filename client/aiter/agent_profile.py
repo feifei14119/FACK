@@ -51,6 +51,7 @@ def agent_profile(ctx):
     return {"arch": config["arch"],
             "skills": skills,
             "validation": validation_contract(config, driver),
+            "publication": {"mode": "git_commit_push", "output_dir": "client/aiter/co_out", "readme": "README.md"},
             "workload": {"manifest": opts.manifest, "co": config["co"], "symbol": config["symbol"],
                          "inputs": config["inputs"], "source": "dispatch_csv" if "dispatch" in config else "explicit_manifest",
                          "dispatch": config.get("dispatch")},

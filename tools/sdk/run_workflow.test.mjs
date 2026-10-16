@@ -128,6 +128,30 @@ test("SDK exception reports without client work; final error still reports once 
   assert.match(finalFailure.result.errors[0], /recovery_required/);
 });
 
+test("client-declared publication runs only after successful final and report, and errors are not retried", () => {
+  for (const mode of ["gain", "retained", "report-error", "publish-error", "undeclared", "interrupted"]) {
+    const calls = [];
+    const invoke = (args) => {
+      const command = args[0] === "tools/tune_run.py" ? args[1] : args[0];
+      calls.push(command);
+      if (command === "status") return { manifest: { comparison_policy: policy,
+        evaluation_contract: { agent_profile: mode === "undeclared" ? {} : { publication: {mode: "git_commit_push"} } } },
+        state: { phase: "search", final_result: null } };
+      if (command === "final") return {status: mode === "retained" ? "original_retained" : "final_recommended"};
+      if (command === "tools/tune_run_report.py" && mode === "report-error") throw Error("report invalid");
+      if (command === "tools/publish_run.py" && mode === "publish-error") throw Error("push failed");
+      return {status: "published"};
+    };
+    const result = finishRun({invoke, runDir: "/run", successful: mode !== "interrupted"});
+    assert.equal(calls.filter(c => c === "tools/publish_run.py").length, ["gain", "publish-error"].includes(mode) ? 1 : 0);
+    if (mode === "gain") {
+      assert.deepEqual(calls, ["status", "final", "tools/tune_run_report.py", "tools/publish_run.py"]);
+      assert.equal(result.publication.status, "published");
+    }
+    if (mode === "publish-error") assert.match(result.errors[0], /publication: push failed/);
+  }
+});
+
 test("agent cleanup has a bounded wait for stalled creation and disposal", async () => {
   const stalled = new Promise(() => {});
   await assert.rejects(disposeAgent(stalled, { timeoutMs: 5 }), /termination is unverified/);

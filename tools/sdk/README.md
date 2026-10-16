@@ -13,7 +13,8 @@ node tools/sdk/tune.mjs
   │         └─ profile（仅显式搜索策略允许，独立计费的导航证据）
   │         └─ history → warm-start（仅显式历史来源，CPU 重建后仍需当前评测）
   ├─ tune_run.py final                    正常结束且有显式策略时，由 SDK 发起一次
-  └─ tune_run_report.py                   正常或异常结束均尝试导出已有证据
+  ├─ tune_run_report.py                   正常或异常结束均尝试导出已有证据
+  └─ publish_run.py                      client 声明时，final 获胜后导出、记行、commit/push
 ```
 
 静态验证只覆盖引擎已建模的 ISA 约束，仍须通过 client 检查正确性和性能。
@@ -108,6 +109,34 @@ worker 汇报要求列出已声明的 workload／配置来源、逐项指标、�
 中断期间若创建请求稍后完成，仍清理该 agent，且不再向它发送调优任务。
 清理最多等待 8 秒；清理失败或超时会明确报错并跳过自动 final，不把终止状态当作已确认。
 这不保证外部进程已经退出，残留运行或控制器锁仍需显式检查和恢复。
+
+### aiter 获胜结果自动发布
+
+aiter 的绑定 profile 声明了自动 Git 发布。SDK 正常结束、全部必需指标通过 final、报告导出成功后，
+固定程序复制参与 final 的 `.co`，不用模型手工整理或重新编译。其他 client 只有显式声明同一发布协议才执行。
+
+```text
+client/aiter/co_out/
+  gfx942/<原目录>/<原文件名>.co         最近一次发布的同名候选
+  .versions/<CO SHA>/gfx942/...co       不可变历史版本，README 链接到这里
+  .sources/<汇编 SHA>.s                对应源码
+  records/<结果 ID>.json               输入、CSV 来源、逐项提升、SHA、完成时间及耗时
+```
+
+根 `.gitignore` 对该目录下 `.co` 设置了例外，这些成果纳入 Git。原始上游 HSA 保持原样。
+根 README 追加五列：序号、co 名字（含路径）、输入尺寸、性能提升、调优时间。
+提升为 final 配对比值的百分比，各指标分别显示；时间同时包含 UTC 完成时刻与从 init 到 final 的耗时。
+当前目录中的同名候选只适用于记录中的 workload，不表示所有尺寸都可通用替换。
+
+原版保留、未 final、只筛选、缺项或失败都不发布。以 client／原路径、原版汇编 SHA、候选 CO SHA 和
+完整输入／符号去重；同结果重跑不会重复追加。不同候选保留不可变版本，同候选在不同输入下的结果分别记录。
+README 的自动表格由注释标记识别，不覆盖已有正文。
+
+发布用独立 Git 暂存区，仅提交成果文件与 README 新增行，保留其他暂存／未暂存修改。
+使用当前分支的 upstream；未配置时使用 origin 上的同名分支。只做普通 push，不自动拉取、rebase 或 force push。
+失败时 SDK 返回错误并保留成果和已创建的 commit，状态记录于 `RUN/publication.json`。
+解决凭据或远端冲突后可显式执行 `python3 tools/publish_run.py RUN`，重试不启动 GPU、模型或新测量。
+已有旧格式 campaign 不会自动扫描或冒充新协议结果；历史迁移需单独核对记录。
 
 `--region loop` 等具体区域通过提示词固定；`all` / `auto` / `any` 允许跨区重新 observe。
 控制器校验每个 spec 与其 observation 区域一致。模型的 region 使用约定不等于 shell 权限限制。
@@ -309,7 +338,7 @@ python3 -m pytest -q unittests/test_run_report.py
 
 | exit | 含义 |
 |---|---|
-| 0 | SDK 正常完成且收尾报告成功；不表示 final 一定通过 |
+| 0 | SDK 正常完成、收尾报告及已配置的发布成功；不表示 final 一定通过 |
 | 1 | 缺 API key 或 CursorAgentError |
 | 2 | 参数错误或 SDK 非 finished 状态 |
 | 3 | 初始化/运行/收尾异常 |

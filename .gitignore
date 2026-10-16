@@ -3,6 +3,7 @@ __pycache__/
 *.pyo
 *.o
 *.co
+!/client/aiter/co_out/**/*.co
 *.egg-info/
 .pytest_cache/
 .venv/

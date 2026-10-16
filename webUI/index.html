@@ -87,7 +87,7 @@
           </div>
         </div>
         <details class="card"><summary>高级：SDK agent 调优入口</summary>
-          <p class="desc">选择计划中的 aiter workload，或手动填写其他 client 与 seed，启动本地 Cursor agent。自动加载所选 client 与架构技能；填写配对策略后执行逐指标确认和最终复测，留空则只筛选。关联尺寸采用按 client 技能继续验收。</p>
+          <p class="desc">选择计划中的 aiter workload，或手动填写其他 client 与 seed，启动本地 Cursor agent。自动加载所选 client 与架构技能；填写配对策略后执行逐指标确认和最终复测，留空则只筛选。aiter 最终获胜候选自动保存到 co_out、追加 README 并提交推送 Git；关联尺寸采用按 client 技能继续验收。</p>
           <div class="form" id="tuneForm">
             <label>输入来源<select name="source_mode" id="sdkSourceMode"><option value="planned">所选 aiter CSV workload</option><option value="manual">手动选择 client / seed</option></select></label>
             <label>seed .s<input name="seed" data-def="seed" readonly /></label>

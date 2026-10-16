@@ -15,6 +15,7 @@ from harness.evaluator import EvalResult
 from harness.evidence import BuildEvidence, collect_identity
 from harness import toolchain
 from client.aiter.agent_profile import agent_profile, result_evidence
+from client.aiter.publication import publication_candidate
 
 
 def identity(ctx):
@@ -24,6 +25,7 @@ def identity(ctx):
         "client": HERE / "client.py", "runner": HERE / "runner.py",
         "configuration": HERE / "common.py",
         "agent_profile": HERE / "agent_profile.py",
+        "publication": HERE / "publication.py",
         "original_co": UPSTREAM / "hsa" / data["arch"] / data["co"],
         "gitmodules": HERE.parent.parent / ".gitmodules",
         "python": shutil.which(opts.python),

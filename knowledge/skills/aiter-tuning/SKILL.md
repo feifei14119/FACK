@@ -57,3 +57,20 @@ CSV 绑定任务还必须通过正常入口派发验证。主机 loader/派发�
 记录已搜索、仅做关联比较、原版保留、待适配和未开始的区别。保存 `.s/.co`、SHA、原始记录、
 逐方法结果和复现命令到 `client/aiter/tune_out/`。按用户要求报告进度；结束时停止本次专用容器并核对状态。
 新实验经验先作为候选保存，不自动晋升知识库或启动自学。
+
+## SDK 成果发布
+
+绑定的 aiter profile 声明 `publication.mode=git_commit_push`。SDK worker 正常结束、final 推荐候选、
+报告成功后，由固定程序 `tools/publish_run.py RUN` 自动复制实测 `.co`，追加根 README，commit 并 push。
+worker 不自行编辑 README、复制发布文件或执行 Git 写操作。此流程已获项目用户授权，后续按此执行。
+
+输出为 `client/aiter/co_out/<gfx>/<原 co 相对路径>`，纳入 Git；`.versions/<CO SHA>/` 保留同结构的
+不可变版本，`.sources/` 保存汇编，`records/` 保存逐项结果、输入、CSV 来源、SHA 和调优时间。
+README 每行包含序号、co 路径、输入尺寸、所有必需方法的配对提升、UTC 完成时间及 run 耗时。
+发布表示所记录 workload 的性能提升，不表示已经通过所有关联尺寸的通用替换验收。
+
+只发布 final 的全部必需指标均确认提升、且实际 `.co` 与原版不同的候选；保留 original、筛选、
+仅 confirm、验证缺项或失败均不追加。复制的必须是参与 final 的同 SHA 产物，不为发布重新编译。
+同候选／原版／输入重复发布不重复记行；同名新版本保留旧文件，README 链接固定版本。
+Git 使用独立暂存区，不带入其他文件或 README 的既有编辑；推送失败保留本地 commit，
+显式重跑 `python3 tools/publish_run.py RUN` 重试，不自动 force push、pull 或 rebase。

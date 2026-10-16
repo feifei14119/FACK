@@ -51,5 +51,6 @@ SDK 与 Web UI 接受 `.s` 汇编作为 seed。
 
 - `client/aiter/upstream` 是 ROCm/aiter 的固定版本 submodule；初始化使用 `bash tools/init_aiter.sh`，不自动追踪 main。
 - 适配层、manifest 和 driver 维护在 submodule 外；候选编译到 `client/aiter/tune_out/`，不覆盖上游 HSA 文件。
+- SDK 的 aiter final 获胜产物自动发布到 Git 跟踪的 `client/aiter/co_out/<gfx>/<原路径>`，追加根 README 后 commit/push；只通过固定发布程序执行，保留 original 不发布。见 aiter-tuning skill。
 - 使用架构对应的 `aiter/hsa/<gfx>` SPEC；先在目标真机验证 seed，再调优。使用说明见 [client/aiter/README.md](client/aiter/README.md)。
 - 新环境按 [操作步骤](client/aiter/docs/validation.md) 执行；已验证环境与案例随仓库保存。用户要求运行或验证任务后按授权范围执行；仅整理资料时不启动 GPU 实验。
