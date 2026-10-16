@@ -168,3 +168,63 @@ test('full campaign page distinguishes attempts from completed validation and de
   assert.match(box.innerHTML, /不表示全部未调优，也不与 CSV 覆盖数量合并/);
   assert.match(box.innerHTML, /成功 1；错误 0；最新 commit abc123/);
 });
+
+test('campaign list puts active and completed work before alphabetically earlier pending kernels', () => {
+  const measured = {original_screen:{status:'measured',correct:true,time_us:8,valid_samples:3},
+    final:{status:'original_retained'},paired_results:[]};
+  const pending = {task_id:'pending',co:'fp8.co',status:'pending',run_id:'reserved'};
+  const done = {task_id:'done',co:'int8.co',status:'completed',metrics:measured,attempt_finished_at:'2026-10-16T03:00:00Z'};
+  const recent = {...done,task_id:'recent',attempt_finished_at:'2026-10-16T03:10:00Z'};
+  const unresolved = {...done,task_id:'unresolved',status:'coverage_pending'};
+  const active = {task_id:'active',co:'int8.co',status:'tuning'};
+  const campaign = {kernels:[pending,unresolved,done,active,recent],
+    remaining:[pending,unresolved,active],current_task_id:'active'};
+  const ids = filter => view.rows(campaign,filter,'').map(r => r.task_id);
+  assert.deepEqual(ids('all'),['active','recent','done','unresolved','pending']);
+  assert.deepEqual(ids('completed'),['recent','done']);
+  assert.deepEqual(ids('measured'),['recent','done','unresolved']);
+  assert.deepEqual(ids('not_started'),['pending']);
+  assert.deepEqual(ids('remaining'),['active','unresolved','pending']);
+  assert.deepEqual(ids('active'),['active']);
+  assert.deepEqual(view.rows(campaign,'completed','fp8.co'),[]);
+  assert.equal(campaign.kernels[0],pending, 'sorting must not mutate the source snapshot');
+  assert.equal(view.hasMeasurements(pending),false);
+  assert.equal(view.hasMeasurements({metrics:{attempted_candidates:6}}),false);
+  assert.equal(view.hasMeasurements(done),true, 'no confirm pairs does not mean no measurements');
+  assert.match(view.metrics(done.metrics), /8 µs/);
+  assert.doesNotMatch(view.metrics(done.metrics), /尚无实测/);
+});
+
+test('live campaign page status filter exposes completed rows and labels pending shapes as planned', async () => {
+  const fs = require('node:fs'), vm = require('node:vm');
+  const workload = {inputs:{m:32,n:8192,k:7168},selection:'dispatch_csv',csv:[{path:'model.csv',line:1152}]};
+  const pending = {task_id:'pending',co:'fp8-pending.co',status:'pending',workload:{...workload,dispatch_status:'not_checked'}};
+  const done = {task_id:'done',co:'int8-finished.co',status:'completed',workload:{...workload,dispatch_status:'verified'},
+    metrics:{original_screen:{status:'measured',correct:true,time_us:6.1,valid_samples:3},final:{status:'original_retained'}}};
+  const active = {...done,task_id:'active',co:'int8-active.co',status:'tuning'};
+  const campaign = {campaign_id:'mixed',generated_at:new Date().toISOString(),remote_updated_at:new Date().toISOString(),
+    sync:{connected:true},counts:{known:3,target_count:3,finished:1,remaining:2},
+    kernels:[pending,done,active],remaining:[pending,active],current_task_id:'active'};
+  const box = {innerHTML:'',querySelectorAll:()=>[]};
+  const elements = Object.fromEntries(['campaignQuery','campaignStatus','refreshCampaigns'].map(id=>[id,
+    {value:id==='campaignStatus'?'all':'',addEventListener(event,handler){this.onInput=handler;}}]));
+  const context = {document:{querySelector:selector=>selector==='#campaignsBox'?box:elements[selector.slice(1)]},
+    window:{FACKCampaignView:view,FACKWorkloadView:require('./workload_view.js')},location:{hash:''},setInterval:()=>{},
+    fetch:async()=>({ok:true,json:async()=>({campaigns:[campaign],errors:[]})})};
+  vm.runInNewContext(fs.readFileSync(require.resolve('./campaigns.js'),'utf8'),context);
+  await new Promise(setImmediate);
+  assert.ok(box.innerHTML.indexOf('int8-active.co') < box.innerHTML.indexOf('int8-finished.co'));
+  assert.ok(box.innerHTML.indexOf('int8-finished.co') < box.innerHTML.indexOf('fp8-pending.co'));
+  assert.match(box.innerHTML,/计划尺寸：M=32/);
+  assert.match(box.innerHTML,/包括保留原版；不等于优化成功/);
+  elements.campaignStatus.value='completed';elements.campaignStatus.onInput();
+  assert.match(box.innerHTML,/显示 1 \/ 3/);
+  assert.match(box.innerHTML,/正常入口派发已验证/);
+  assert.match(box.innerHTML,/6.1 µs/);
+  assert.match(box.innerHTML,/测试尺寸：M=32/);
+  assert.doesNotMatch(box.innerHTML,/fp8-pending.co|int8-active.co|尚未验证派发|尚无实测|计划尺寸/);
+  elements.campaignStatus.value='not_started';elements.campaignStatus.onInput();
+  assert.match(box.innerHTML,/fp8-pending.co/);
+  assert.match(box.innerHTML,/计划尺寸/);
+  assert.match(box.innerHTML,/尚未验证派发/);
+});

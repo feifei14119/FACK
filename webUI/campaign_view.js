@@ -11,6 +11,36 @@
     value.toLocaleString("en-US", {maximumFractionDigits: 5, useGrouping: false}) : "—";
   const identity = (value) => value ? '<code title="' + esc(value) + '">' +
     esc(value.length > 22 ? value.slice(0, 18) + '…' : value) + '</code>' : '未记录';
+  const positive = value => typeof value === 'number' && Number.isFinite(value) && value > 0;
+  const list = value => Array.isArray(value) ? value : [];
+  function hasMeasurements(row) {
+    const value = row.metrics || {};
+    const original = value.original_screen || {};
+    const screen = original.measurement || original;
+    return positive(screen.time_us) || list(screen.samples).some(s => s && positive((s.result || {}).time_us)) ||
+      list(value.candidate_screens).some(s => s && positive((s.hip_graph || {}).median_us)) ||
+      list(value.paired_results).some(s => s && (positive(s.reference_median_us) || positive(s.candidate_median_us))) ||
+      Object.values(value.cross_shape_results || {}).some(s => s && (positive(s.reference_median_us) || positive(s.candidate_median_us)));
+  }
+  function rows(campaign, filter, query) {
+    const remaining = new Set((campaign.remaining || []).map(workload.key));
+    const finishedStates = new Set(['completed', 'done', 'optimized', 'confirmed_gain', 'final_recommended',
+      'original_retained', 'retained_original', 'winner_confirmed']);
+    const finished = row => finishedStates.has(row.status) && row.in_scope !== false &&
+      (!Array.isArray(campaign.remaining) || !remaining.has(workload.key(row)));
+    const active = row => workload.key(row) === campaign.current_task_id ||
+      ['tuning', 'running', 'validating'].includes(row.status);
+    const pending = row => !active(row) && !hasMeasurements(row) &&
+      ['pending', 'pending_original_validation', 'queued', 'discovered', 'ready_for_validation'].includes(row.status);
+    const priority = row => active(row) ? 0 : finished(row) ? 1 : hasMeasurements(row) ? 2 : pending(row) ? 4 : 3;
+    const stamp = row => Date.parse(row.attempt_finished_at) || 0;
+    return (campaign.kernels || []).filter(row => {
+      const accepted = filter === 'completed' ? finished(row) : filter === 'active' ? active(row) :
+        filter === 'measured' ? hasMeasurements(row) : filter === 'not_started' ? pending(row) :
+        filter === 'remaining' ? remaining.has(workload.key(row)) : true;
+      return accepted && (!query || JSON.stringify(row).toLowerCase().includes(query.toLowerCase().trim()));
+    }).sort((a, b) => priority(a) - priority(b) || stamp(b) - stamp(a));
+  }
   function paired(row) {
     const reference = row.reference_id === 'original' ? '原始' : '参考';
     return '<p><strong>独立配对 · ' + esc(row.method) + '</strong><br><small>阶段 ' + esc(row.stage) +
@@ -126,5 +156,5 @@
       evidence + '<details><summary>完整诊断字段</summary><pre>' + esc(JSON.stringify(value, null, 2)) +
       '</pre></details></div>';
   }
-  return {metrics, artifacts, diagnostic};
+  return {metrics, artifacts, diagnostic, hasMeasurements, rows};
 });
