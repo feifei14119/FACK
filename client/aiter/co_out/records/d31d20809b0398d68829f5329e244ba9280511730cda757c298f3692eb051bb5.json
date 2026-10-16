@@ -1,0 +1,335 @@
+{
+  "archive_path": "client/aiter/co_out/.versions/c1b0da2f9be9e76e34f1a1a539feaad872a8f4464b9afa54ad5adac1459b4b57/gfx942/fp8gemm_blockscale/fp8gemm_bf16_blockscale_BpreShuffle_128x128.co",
+  "assembly_path": "client/aiter/co_out/.sources/54f071c7c83af172b78f787e80f5f5c0c93bda58d3306b6585bb7c4c78b1de04.s",
+  "candidate_id": "cand_54f071c7c83af172b78f787e80f5f5c0c93bda58d3306b6585bb7c4c78b1de04",
+  "client": "aiter/hsa/gfx942",
+  "co_sha256": "c1b0da2f9be9e76e34f1a1a539feaad872a8f4464b9afa54ad5adac1459b4b57",
+  "comparison_policy": {
+    "alpha": 0.05,
+    "confirm_pairs": 8,
+    "final_pairs": 8,
+    "max_confirmations": 2,
+    "method": "paired_sign_v1",
+    "min_gain": 0.01
+  },
+  "display_inputs": {
+    "dtype": "torch.float8_e4m3fnuz",
+    "k": 7168,
+    "m": 1408,
+    "n": 4608,
+    "outdtype": "torch.bfloat16",
+    "splitK": 1
+  },
+  "duration_seconds": 1396.631604194641,
+  "finished_at": "2026-10-16T19:10:08+00:00",
+  "id": "d31d20809b0398d68829f5329e244ba9280511730cda757c298f3692eb051bb5",
+  "latest_path": "client/aiter/co_out/gfx942/fp8gemm_blockscale/fp8gemm_bf16_blockscale_BpreShuffle_128x128.co",
+  "methods": {
+    "hip_graph": {
+      "alpha_one_sided": 0.05,
+      "candidate_median": 317.0591163635254,
+      "candidate_range": [
+        316.90011978149414,
+        317.2585105895996
+      ],
+      "direction": "lower",
+      "log_ratios": [
+        0.01797741207250425,
+        0.015432488911773845,
+        0.01768841126339904,
+        0.018083386032413884,
+        0.01827074824196462,
+        0.016658198521342982,
+        0.01801489560614744,
+        0.017205050224974983
+      ],
+      "log_tolerance": 1e-12,
+      "lower_log_bound": 0.016658198521342982,
+      "lower_rank": 2,
+      "lower_ratio_bound": 1.0167977199589464,
+      "median_log_ratio": 0.017832911667951645,
+      "median_ratio": 1.0179928674483207,
+      "method": "paired_sign_v1",
+      "min_gain": 0.01,
+      "pairs": 8,
+      "reference_median": 322.7499580383301,
+      "reference_range": [
+        322.1925735473633,
+        322.88936614990234
+      ],
+      "scope": "client_reported_scores; iid_pair_assumption_not_hardware_verified",
+      "unit": "us",
+      "upper_log_bound": 0.018083386032413884,
+      "upper_ratio_bound": 1.018247880500605,
+      "verdict": "confirmed_gain"
+    },
+    "op_test:constant/constant": {
+      "alpha_one_sided": 0.05,
+      "candidate_median": 311.87687707979626,
+      "candidate_range": [
+        311.68408510638295,
+        312.12447368421056
+      ],
+      "direction": "lower",
+      "log_ratios": [
+        0.01712870353866336,
+        0.017570000167509647,
+        0.016702297820238243,
+        0.017676215593545486,
+        0.018019906230288818,
+        0.018119252044588308,
+        0.017480413503445646,
+        0.01605533881323229
+      ],
+      "log_tolerance": 1e-12,
+      "lower_log_bound": 0.016702297820238243,
+      "lower_rank": 2,
+      "lower_ratio_bound": 1.0168425610142373,
+      "median_log_ratio": 0.017525206835477647,
+      "median_ratio": 1.0176796743115748,
+      "method": "paired_sign_v1",
+      "min_gain": 0.01,
+      "pairs": 8,
+      "reference_median": 317.32272693169097,
+      "reference_range": [
+        317.17618279569894,
+        317.50471578947366
+      ],
+      "scope": "client_reported_scores; iid_pair_assumption_not_hardware_verified",
+      "unit": "us",
+      "upper_log_bound": 0.018019906230288818,
+      "upper_ratio_bound": 1.0181832443782022,
+      "verdict": "confirmed_gain"
+    },
+    "op_test:uniform/auto": {
+      "alpha_one_sided": 0.05,
+      "candidate_median": 317.8851968085106,
+      "candidate_range": [
+        317.48967021276593,
+        318.08114893617017
+      ],
+      "direction": "lower",
+      "log_ratios": [
+        0.016746054327347437,
+        0.016067443452384644,
+        0.016933739374090706,
+        0.01827167657768136,
+        0.018875225955883757,
+        0.017701198273846863,
+        0.017945248518840273,
+        0.017019121826495898
+      ],
+      "log_tolerance": 1e-12,
+      "lower_log_bound": 0.016746054327347437,
+      "lower_rank": 2,
+      "lower_ratio_bound": 1.016887055466441,
+      "median_log_ratio": 0.01736016005017138,
+      "median_ratio": 1.0175117234131175,
+      "method": "paired_sign_v1",
+      "min_gain": 0.01,
+      "pairs": 8,
+      "reference_median": 323.47781506159026,
+      "reference_range": [
+        323.2331789473685,
+        323.7376000000001
+      ],
+      "scope": "client_reported_scores; iid_pair_assumption_not_hardware_verified",
+      "unit": "us",
+      "upper_log_bound": 0.01827167657768136,
+      "upper_ratio_bound": 1.0184396250005134,
+      "verdict": "confirmed_gain"
+    }
+  },
+  "number": 25,
+  "original_co_sha256": "5fa1deb11420282c49701480ae0078d7a0f477a5c66b33ea7967412fd9330d05",
+  "original_sha256": "b62da57b84cd85bc1d7687b02dea70cf6e8d71560250dc6679c01b39eff029f6",
+  "recommendation_scope": "workload",
+  "relative_path": "gfx942/fp8gemm_blockscale/fp8gemm_bf16_blockscale_BpreShuffle_128x128.co",
+  "run_id": "full-6ee9cecab95967db1a3c09db",
+  "schema_version": 1,
+  "source_sha256": "54f071c7c83af172b78f787e80f5f5c0c93bda58d3306b6585bb7c4c78b1de04",
+  "workload": {
+    "co": "fp8gemm_blockscale/fp8gemm_bf16_blockscale_BpreShuffle_128x128.co",
+    "dispatch": {
+      "adapter_sha256": {
+        "dispatch.py": "a5bfa04c00876be1c1583abf72a47528d9d9a1622e0404894bc5a838a4853c12",
+        "hsa/gfx942/dispatch_driver.py": "dda8e1f9dfb0e8ae8e7b3a9b8b3b9bb5c177a2e2c8b66d07cc12b8d0ac7a32eb",
+        "hsa/gfx942/driver.py": "7a92377ddbb94d4743a0236e86776bc80c6a440532c9ea2fa4ffd308e3c7a022",
+        "hsa/gfx942/gemm_driver.py": "56afb2581edae92b9dd685b2f194c09815d8e995e256e99e8755eea1368ad26f",
+        "hsa/gfx942/optest_driver.py": "19bf67f5b4f64d2842f4188a88b3a27897d730d0a536bf664a99c63e926261e9"
+      },
+      "arch": "gfx942",
+      "binding_id": "fd70e9805d00171968a950357ab9929dbd3d899b7456897c3c344d07f9cfdb90",
+      "catalog": "fp8gemm_blockscale/fp8gemm_bf16_blockscale.csv",
+      "catalog_sha256": "8b5562d6202403f6bf14a228b4e13092e6115f022c8b7dbb1ecdbe5f93fb019a",
+      "co": "fp8gemm_blockscale/fp8gemm_bf16_blockscale_BpreShuffle_128x128.co",
+      "cu_num": 80,
+      "entrypoint": "aiter.ops.gemm_op_a8w8.gemm_a8w8_blockscale_bpreshuffle",
+      "family": "blockscale_preshuffle",
+      "inputs": {
+        "a_row_padding": 0,
+        "a_scale_block": [
+          1,
+          128
+        ],
+        "a_scale_layout": "transpose_contiguous_view",
+        "a_scale_shape": [
+          1408,
+          56
+        ],
+        "b_scale_block": [
+          128,
+          128
+        ],
+        "b_scale_layout": "row_major",
+        "b_scale_shape": [
+          36,
+          56
+        ],
+        "bias": null,
+        "bpreshuffle": true,
+        "dtype": "torch.float8_e4m3fnuz",
+        "family": "blockscale",
+        "k": 7168,
+        "m": 1408,
+        "n": 4608,
+        "outdtype": "torch.bfloat16",
+        "quantization": "blockscale",
+        "scale_dtype": "torch.float32",
+        "splitK": 1,
+        "weight_layout": [
+          16,
+          16
+        ]
+      },
+      "original_co_sha256": "de905e406509c62f78d0760a36e762f7de89ded5d39fd3f98062eb58a8078b99",
+      "reference": {
+        "line": 1067,
+        "source": {
+          "path": "aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv3.csv",
+          "sha256": "8ec8ffce960716cbee8703af38c656c59a28687237eb3bf9f75aef95e5f2bf43"
+        },
+        "stage": "kernelName"
+      },
+      "resolver_sha256": {
+        "aiter/jit/core.py": "91255bfdc97876be9305943fa42c6129cd5673437e9b7c1b093a6ba29a08e813",
+        "aiter/jit/utils/chip_info.py": "c5b24372dfa8fe63f33eeb645312076f241468934fcf36117934f0e5242cde38",
+        "aiter/ops/gemm_op_a8w8.py": "73b69a51df02a83df38fed284d022a719625c088813cf89f4595bf17f961100c",
+        "aiter/tuned_gemm.py": "9970655f7fd9c98a92bd42dc28342b5caf099d0bf3b83580f6aa4631a12aae4c"
+      },
+      "row": {
+        "K": "7168",
+        "M": "1408",
+        "N": "4608",
+        "bw": "0.17437",
+        "cu_num": "80",
+        "errRatio": "0.0",
+        "gfx": "gfx942",
+        "kernelId": "40",
+        "kernelName": "_ZN5aiter43fp8gemm_bf16_blockscale_BpreShuffle_128x128E",
+        "libtype": "asm",
+        "splitK": "1",
+        "tflops": "289.11",
+        "us": "321.7264"
+      },
+      "scope": "exact-row dispatch using frozen arch/CU config override",
+      "snapshot": "blockscale_preshuffle.csv",
+      "snapshot_sha256": "2638aa62914d54f84e4aa45d406793bdd8bce6e679c0aff606db6cb68a9031b8",
+      "sources": [
+        {
+          "path": "aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv",
+          "sha256": "c17a747be9084ec40d1d47a16336bb8d5a1164ebba32335a5e4dcf986d01ab35"
+        },
+        {
+          "path": "aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv3.csv",
+          "sha256": "8ec8ffce960716cbee8703af38c656c59a28687237eb3bf9f75aef95e5f2bf43"
+        },
+        {
+          "path": "aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv4.csv",
+          "sha256": "bc66e73b9ee62f5dd18c3e1aee2b27645e6059674272bbd96f46a7c2e0723f7f"
+        },
+        {
+          "path": "aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_glm5.2.csv",
+          "sha256": "77e54d26fa0f4958dd0ca4956084ec62c1c0a5dea3d78e543827dca2e6bc9170"
+        },
+        {
+          "path": "aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_mm2.5.csv",
+          "sha256": "d296fc99faaa65fd77db4793e85ddc6ac49924fdd6317d8210917849ff6fa795"
+        },
+        {
+          "path": "aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen3.5_397b.csv",
+          "sha256": "65246705468a77baacc29af9831825efdbba78b8aab5e324d484463f4ddfea97"
+        },
+        {
+          "path": "aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen38_27b.csv",
+          "sha256": "57aad6cb735fec7709f8bef5bb6d11b1c201ab607705052869116acc99109d30"
+        },
+        {
+          "path": "aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen3_235b.csv",
+          "sha256": "dfb9933ad00ffc913f1488f507658c632d6949ee34276dc2fb7f2dda9c5b59f5"
+        },
+        {
+          "path": "aiter/configs/model_configs/dsv4_a8w8_blockscale_bpreshuffle_tuned_gemm.csv",
+          "sha256": "6005999f566cf303ec8622575a1b18a6d61840af499e2cbf97421f01615ba724"
+        },
+        {
+          "path": "aiter/configs/model_configs/glm5_a8w8_blockscale_bpreshuffle_tuned_gemm.csv",
+          "sha256": "26eecd1fc45eddccfc78046fa8b9c42c1796a753ae502f1e1baaae44bec566c4"
+        }
+      ],
+      "symbol": "_ZN5aiter43fp8gemm_bf16_blockscale_BpreShuffle_128x128E",
+      "validation_sha256": {
+        "aiter/benchmark_data_init.py": "0921ff000ccf8abe18788f34f693c496690c4553cb657c8794f0f151686af0e0",
+        "aiter/benchmark_reporting.py": "4316e3d6e1e27adb7574c1bfaa52384dc61e264c8b1827132472b50b03a15b7c",
+        "aiter/ops/shuffle.py": "0e46112e22d0f4b6d59bd8eaa5868f7c87c0eb8669cecd1c6a011e7f75c29930",
+        "aiter/ops/triton/gemm/basic/gemm_a8w8_blockscale.py": "7117cc5cdeb76f602d11a1f304cd8353f89c066dac4ee71dc523796b80d29c9e",
+        "aiter/test_common.py": "ab6fca8ff0c159869ac12016caf852efab8eba458f9f5381b9f2ad3aa5e58032",
+        "aiter/utility/dtypes.py": "da7b3b80c099079ccfe73273b829d38a05d06c6fcdac74f3a09ceb24ba7174a7",
+        "aiter/utility/fp4_utils.py": "6f4ecb4dd9eb22d30653264c851d000ce95b0ec8bc1fb40718b72c96eb3b70eb",
+        "csrc/ck_gemm_a8w8_blockscale_bpreshuffle/gemm_a8w8_blockscale_bpreshuffle.cu": "8b9632d8d8b1ddb16fbf0e2aec4381ddc838dc95f8a7fb5baa77ab26f000917c",
+        "csrc/py_itfs_cu/asm_a8w8_blockscale_bpreshuffle.cu": "519989c8d393d23ece57c6234b2730101869951e91a534212c38d76685e8bb76",
+        "op_tests/test_gemm_a8w8_blockscale.py": "4be1b0fae5f43b786aa077673dccf2bbdcdd9a3036b7cb69f3ed93091eb0a9f3"
+      },
+      "version": 1,
+      "workload_id": "6ee9cecab95967db1a3c09db"
+    },
+    "inputs": {
+      "a_row_padding": 0,
+      "a_scale_block": [
+        1,
+        128
+      ],
+      "a_scale_layout": "transpose_contiguous_view",
+      "a_scale_shape": [
+        1408,
+        56
+      ],
+      "b_scale_block": [
+        128,
+        128
+      ],
+      "b_scale_layout": "row_major",
+      "b_scale_shape": [
+        36,
+        56
+      ],
+      "bias": null,
+      "bpreshuffle": true,
+      "dtype": "torch.float8_e4m3fnuz",
+      "family": "blockscale",
+      "k": 7168,
+      "m": 1408,
+      "n": 4608,
+      "outdtype": "torch.bfloat16",
+      "quantization": "blockscale",
+      "scale_dtype": "torch.float32",
+      "splitK": 1,
+      "weight_layout": [
+        16,
+        16
+      ]
+    },
+    "source": "dispatch_csv",
+    "symbol": "_ZN5aiter43fp8gemm_bf16_blockscale_BpreShuffle_128x128E"
+  }
+}
