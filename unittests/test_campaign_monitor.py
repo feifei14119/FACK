@@ -213,3 +213,73 @@ def test_independent_diagnostic_preserved_without_changing_completion(tmp_path):
     assert '独立诊断不计入候选采用或 .co 完成数' in report
     assert 'moe-control' in report and '"records_completed": 3' in report
     assert 'previous-control' in report and '历史独立诊断' in report
+
+
+def test_full_campaign_closes_only_after_attempts_and_associations_without_counting_failures(tmp_path):
+    control = dict(config(tmp_path), deadline=None, stop_condition='all_runnable_workloads_completed')
+    progress = {'status': 'completed', 'completion': {'all_tasks_attempted': True,
+        'associations_finished': True, 'total_tasks': 2, 'attempted_tasks': 2}, 'kernels': [
+        {'task_id': 'ok', 'co': 'a.co', 'status': 'completed', 'attempt_finished_at': monitor.utcnow(),
+         'metrics': {'campaign_decision': 'original_retained'}},
+        {'task_id': 'bad', 'co': 'b.co', 'status': 'blocked', 'attempt_finished_at': monitor.utcnow()}]}
+    documents = {'plan.json': {'tasks': [{'task_id': 'ok', 'co': 'a.co'}, {'task_id': 'bad', 'co': 'b.co'}],
+        'references': [{'workload_id': 'unsupported', 'status': 'unsupported_adapter', 'matches': []}]},
+        'progress.json': progress}
+    snapshot = monitor.build_snapshot(control, documents, {'attempted_at': monitor.utcnow(),
+        'connected': True, 'last_success_at': monitor.utcnow(), 'errors': {}})
+    assert monitor.success_requested(control, snapshot)
+    assert snapshot['counts']['finished'] == 1
+    assert snapshot['remaining'][0]['task_id'] == 'bad'
+    assert snapshot['remaining_workloads'][0]['workload_id'] == 'unsupported'
+    report = monitor.markdown_report(snapshot)
+    assert '全部可调优任务完成' in report and '已尝试不等于通过完成验收' in report
+    assert '首个严格确认胜出' not in report
+    snapshot['status'] = 'all_runnable_workloads_attempted'
+    assert not monitor.success_requested(control, snapshot)
+    snapshot['status'] = 'completed'
+    for field in ('all_tasks_attempted', 'associations_finished'):
+        snapshot['completion'][field] = False
+        assert not monitor.success_requested(control, snapshot)
+        snapshot['completion'][field] = True
+    snapshot['completion']['attempted_tasks'] = 1
+    assert not monitor.success_requested(control, snapshot)
+    snapshot['completion']['attempted_tasks'] = 2
+    snapshot['sync']['connected'] = False
+    assert not monitor.success_requested(control, snapshot)
+    snapshot['sync']['connected'] = True
+    snapshot['sync']['errors']['progress.json'] = 'missing'
+    assert not monitor.success_requested(control, snapshot)
+    snapshot['sync']['errors'] = {}
+    snapshot['kernels'][1]['status'] = 'pending'
+    assert not monitor.success_requested(control, snapshot)
+
+
+def test_full_campaign_waits_for_fresh_container_stop_before_finalizing(tmp_path, monkeypatch):
+    control = dict(config(tmp_path), deadline=None, stop_condition='all_runnable_workloads_completed')
+    control_path = tmp_path / 'control.json'
+    control_path.write_text(json.dumps(control))
+    documents = {'plan.json': {'tasks': [{'task_id': 'one', 'co': 'a.co'}]},
+        'progress.json': {'status': 'completed', 'completion': {'all_tasks_attempted': True,
+            'associations_finished': True, 'total_tasks': 1, 'attempted_tasks': 1},
+            'kernels': [{'task_id': 'one', 'co': 'a.co', 'status': 'completed',
+                'attempt_finished_at': monitor.utcnow(), 'metrics': {'campaign_decision': 'original_retained'}}]}}
+    calls, finalized = [], []
+    def sync(_control, final=False):
+        calls.append(final)
+        snapshot = monitor.build_snapshot(_control, documents, {'attempted_at': monitor.utcnow(),
+            'connected': True, 'last_success_at': monitor.utcnow(), 'errors': {}}, final=final)
+        snapshot['gpu_stop'] = {'container_state': {'Running': len(calls) < 4}}
+        return snapshot
+    monkeypatch.setattr(monitor, 'sync_once', sync)
+    monkeypatch.setattr(monitor, 'write_report', lambda *args, **kwargs: None)
+    monkeypatch.setattr(monitor, 'finalize', lambda _control, snapshot: finalized.append(snapshot))
+    monkeypatch.setattr(monitor.time, 'sleep', lambda seconds: None)
+    monkeypatch.setattr(sys, 'argv', ['monitor', '--control', str(control_path)])
+    monitor.main()
+    assert calls == [False, True, False, True]
+    assert len(finalized) == 1 and finalized[0]['gpu_stop']['container_state']['Running'] is False
+
+
+def test_unspecified_unlimited_monitor_does_not_imply_first_winner():
+    assert '未声明' in monitor.stop_condition_label({'deadline': None})
+    assert '首个' not in monitor.stop_condition_label({'deadline': None})

@@ -138,3 +138,26 @@ test('fixed candidate cross checks preserve method verdicts without inventing se
   const retained = view.metrics({...value, campaign_decision:'original_retained'});
   assert.match(retained, /最终：保留原始/);
 });
+
+test('full campaign page distinguishes attempts from completed validation and declares its stop condition', async () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const box = {innerHTML:'', querySelectorAll:() => []};
+  const inputs = {value:'', checked:false, addEventListener:() => {}};
+  const campaign = {campaign_id:'full', generated_at:new Date().toISOString(),
+    remote_updated_at:new Date().toISOString(), deadline:null,
+    stop_condition:'all_runnable_workloads_completed', sync:{connected:true},
+    completion:{attempted_tasks:2,total_tasks:2,associations_finished:false},
+    counts:{known:2,target_count:2,finished:1,remaining:1}, kernels:[]};
+  const context = {document:{querySelector:selector => selector === '#campaignsBox' ? box : inputs},
+    window:{FACKCampaignView:view, FACKWorkloadView:require('./workload_view.js')},
+    location:{hash:''}, setInterval:() => {},
+    fetch:async () => ({ok:true, json:async () => ({campaigns:[campaign],errors:[]})})};
+  vm.runInNewContext(fs.readFileSync(require.resolve('./campaigns.js'), 'utf8'), context);
+  await new Promise(setImmediate);
+  assert.match(box.innerHTML, /全部可调优任务完成/);
+  assert.match(box.innerHTML, /已尝试 2 \/ 2/);
+  assert.match(box.innerHTML, /已完成 1；待完成 1/);
+  assert.match(box.innerHTML, /已尝试不等于通过完成验收/);
+  assert.doesNotMatch(box.innerHTML, /首个严格确认胜出/);
+});

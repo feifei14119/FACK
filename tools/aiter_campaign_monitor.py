@@ -239,6 +239,8 @@ def build_snapshot(control, documents, sync, previous=None, final=False):
         'diagnostic': progress.get('diagnostic'),
         'diagnostic_history': progress.get('diagnostic_history', []),
         'category_counts': progress.get('category_counts', {}),
+        'completion': progress.get('completion', {}),
+        'planned_task_ids': list(planned),
         'counts': {'known': len(kernels), 'target_count': len(targets),
                    'out_of_scope': len(kernels) - len(targets),
                    'finished': len(targets) - len(remaining),
@@ -407,7 +409,7 @@ def markdown_report(snapshot, final=False):
              '- 报告时间：' + snapshot.get('report_written_at', snapshot['generated_at']),
              '- 报告槽时间：' + str(snapshot.get('scheduled_report_at', '即时报告')),
              '- 快照同步开始：' + snapshot['generated_at'],
-             '- 截止时间：' + str(snapshot.get('deadline') or '首个严格确认胜出后停止'),
+             '- 停止条件：' + stop_condition_label(snapshot),
              '- 远端状态更新时间：' + str(snapshot['remote_updated_at']),
              '- 最近成功通信：' + str(snapshot['sync']['last_success_at']),
              '- 当前通信：' + ('已连接' if snapshot['sync']['connected'] else '失败；以下为最后同步记录'),
@@ -420,6 +422,9 @@ def markdown_report(snapshot, final=False):
                  count['known'], count['target_count'], count['out_of_scope'], count['finished'], count['remaining']),
              '- 远端产物目录：' + snapshot['remote_output'],
              '- 本机目录：' + snapshot['local_output'], '']
+    if snapshot.get('completion'):
+        lines += ['尝试与关联比较进度：`%s`。已尝试不等于通过完成验收；失败与待适配项仍保留在未完成清单。' %
+                  cell(snapshot['completion']), '']
     if snapshot.get('row_identity') == 'workload':
         lines += ['计数单位为独立 workload；同一 .co 的不同尺寸不会合并。', '',
                   'CSV 覆盖：`%s`。全部未调优 workload 与 .co 原因分别保存为 '
@@ -553,9 +558,38 @@ def write_report(control, snapshot, final=False):
 
 
 def success_requested(control, snapshot):
+    if control.get('stop_condition') == 'all_runnable_workloads_completed':
+        completion = snapshot.get('completion') or {}
+        planned = set(snapshot.get('planned_task_ids') or [])
+        rows = {workloads.key(row): row for row in snapshot.get('kernels', [])}
+        sync = snapshot.get('sync') or {}
+        # An attempt may finish with a blocked/coverage-pending result. This
+        # closes monitoring only after the runner finishes associated workloads;
+        # build_snapshot still retains those failures in the unfinished counts.
+        return (sync.get('connected') is True and
+                not any(name in (sync.get('errors') or {}) for name in ('plan.json', 'progress.json', 'communication')) and
+                snapshot.get('status') == 'completed' and bool(planned) and
+                completion.get('all_tasks_attempted') is True and
+                completion.get('associations_finished') is True and
+                completion.get('total_tasks') == len(planned) and
+                completion.get('attempted_tasks') == len(planned) and
+                all(rows.get(task_id, {}).get('attempt_finished_at') and
+                    rows[task_id].get('status') in FINISHED | {'blocked', 'coverage_pending', 'failed', 'error',
+                                                             'seed_failed', 'adapter_failed'}
+                    for task_id in planned))
     return (control.get('stop_condition') == 'first_confirmed_winner' and
             snapshot.get('status') == 'winner_confirmed' and isinstance(snapshot.get('winner'), dict) and
             bool(snapshot['winner'].get('task_id') or snapshot['winner'].get('workload_id')))
+
+
+def stop_condition_label(value):
+    if value.get('stop_condition') == 'all_runnable_workloads_completed':
+        return '全部可调优任务完成，关联尺寸比较结束并确认专用容器停止；失败与待适配项仍列为未完成'
+    if value.get('stop_condition') == 'first_confirmed_winner':
+        return '首个严格确认胜出，并确认专用容器停止'
+    if value.get('deadline'):
+        return str(value['deadline'])
+    return '未设置截止时间；停止条件：' + str(value.get('stop_condition') or '未声明')
 
 
 def finalize(control, snapshot):
@@ -613,6 +647,7 @@ def main():
                 break
             snapshot['monitor_status'] = 'running'
             snapshot['awaiting_container_stop'] = True
+            atomic_json(root / 'snapshot.json', snapshot)
         snapshot['local_diagnostic_sync'] = sync_diagnostic(control, snapshot.get('diagnostic'))
         atomic_json(root / 'snapshot.json', snapshot)
         now = time.time()

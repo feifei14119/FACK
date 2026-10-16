@@ -34,6 +34,10 @@
         const winningRow = campaign.winner && (campaign.kernels || []).find(r =>
           window.FACKWorkloadView.key(r) === (campaign.winner.task_id || campaign.winner.workload_id));
         const assessment = campaign.winner && (campaign.winner.coverage_assessment || campaign.winner.assess_summary || {});
+        const stopCondition = campaign.stop_condition === 'all_runnable_workloads_completed' ?
+          '全部可调优任务完成，关联尺寸比较结束并确认专用容器停止；失败与待适配项仍列为未完成' :
+          campaign.stop_condition === 'first_confirmed_winner' ? '首个严格确认胜出，并确认专用容器停止' :
+          campaign.deadline ? date(campaign.deadline) : '未设置截止时间；停止条件：' + (campaign.stop_condition || '未声明');
         return '<article class="card campaign-card"><h3>' + esc(campaign.campaign_id) + '</h3>' +
           '<p class="campaign-connection ' + (!sync.connected || (age > 180 && !stopped) ? 'campaign-error' : '') + '">' + esc(warning) +
           ' · ' + (stopped ? '周期监控已结束' : dead ? '已到截止时间，正在收尾同步' : '周期监控运行中') + '</p>' +
@@ -46,11 +50,15 @@
           '<div><dt>本机同步尝试</dt><dd>' + esc(date(sync.attempted_at)) + '</dd></div>' +
           '<div><dt>最近成功通信</dt><dd>' + esc(date(sync.last_success_at)) + '</dd></div>' +
           '<div><dt>远端状态更新时间</dt><dd>' + esc(date(campaign.remote_updated_at)) + '</dd></div>' +
-          '<div><dt>停止条件</dt><dd>' + esc(campaign.deadline ? date(campaign.deadline) : '首个严格确认胜出，并确认专用容器停止') + '</dd></div></dl>' +
+          '<div><dt>停止条件</dt><dd>' + esc(stopCondition) + '</dd></div></dl>' +
           '<p>GPU 停止核验：<strong>' + esc((campaign.gpu_stop || {}).status || 'not_checked') + '</strong></p>' +
           window.FACKCampaignView.diagnostic(campaign.diagnostic) +
           '<p>已知 <strong>' + esc(count.known) + '</strong> 个 ' + (campaign.row_identity === 'workload' ? 'workload' : '.co') + '；本次范围 <strong>' + esc(count.target_count) +
           '</strong>；范围外 ' + esc(count.out_of_scope) + '；已完成 ' + esc(count.finished) + '；待完成 ' + esc(count.remaining) + '</p>' +
+          (campaign.completion && Object.keys(campaign.completion).length ? '<p class="desc">已尝试 ' +
+            esc(campaign.completion.attempted_tasks) + ' / ' + esc(campaign.completion.total_tasks) +
+            '；关联尺寸比较完成：' + esc(campaign.completion.associations_finished) +
+            '。已尝试不等于通过完成验收；失败与待适配项仍保留在未完成清单。</p>' : '') +
           '<p class="desc">类别：' + esc(JSON.stringify(campaign.category_counts || {})) + '</p>' +
           (campaign.coverage_counts ? '<details data-detail-key="coverage-' + esc(campaign.campaign_id) + '"><summary>CSV / .co 覆盖与未调优原因 · ' +
             esc(campaign.coverage_counts.csv_references) + ' 条引用 / ' + esc(campaign.coverage_counts.known_co) + ' 个 .co</summary>' +
