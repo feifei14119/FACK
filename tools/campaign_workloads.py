@@ -39,10 +39,14 @@ def plan_tasks(plan):
     rows = []
     for task in plan.get('tasks', []):
         ref = refs.get(task['task_id'], {})
-        w = reference_row(dict(ref, workload_id=task['task_id']))['workload']
+        if ref:
+            w = reference_row(ref)['workload']
+        else:
+            w = workload(task)
+            w['selection'] = task.get('source_kind') or w.get('selection') or 'recorded_inputs'
         w.update(inputs=task.get('inputs') or w['inputs'], cu_num=plan.get('cu_num'), dispatch_status='not_checked')
         rows.append(dict(task, workload_id=task['task_id'], workload=w,
-                         category=category(ref.get('family') or task.get('inputs', {}).get('family')),
+                         category=task.get('category') or category(ref.get('family') or task.get('inputs', {}).get('family')),
                          status=task.get('status') or 'pending_original_validation',
                          reason=task.get('reason') or 'not_started: awaiting fresh original validation'))
     return rows

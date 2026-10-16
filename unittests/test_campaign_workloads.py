@@ -2,6 +2,7 @@ import csv
 import json
 
 from tools import aiter_campaign_monitor as monitor
+from tools import campaign_workloads as workloads
 from webUI.campaigns import read_campaigns
 
 
@@ -106,3 +107,36 @@ def test_multiple_optest_distributions_are_aggregate_screen_only():
     assert 'op_test（多分布 aggregate screen） 7.00000–8.00000 us' in summary
     for method in methods:
         assert 'final %s：' % method in summary
+
+
+def test_explicit_moe_and_mla_tasks_keep_source_and_category_without_inventing_csv(tmp_path):
+    explicit = {'cu_num': 80, 'references': [], 'tasks': [
+        {'task_id': 'moe-one', 'co': 'moe.co', 'category': 'moe',
+         'source_kind': 'reviewed_explicit_non_csv', 'inputs': {'family': 'fp8', 'm': 1024, 'experts': 4}},
+        {'task_id': 'mla-one', 'co': 'mla.co', 'category': 'mla',
+         'source_kind': 'reviewed_explicit_non_csv', 'inputs': {'family': 'bf16', 'batch_size': 8, 'kv_len': 1024}}]}
+    planned = workloads.plan_tasks(explicit)
+    assert [row['category'] for row in planned] == ['moe', 'mla']
+    assert all(row['workload']['csv'] == [] for row in planned)
+    assert all(row['workload']['selection'] == 'reviewed_explicit_non_csv' for row in planned)
+    progress = {'kernels': [{'task_id': task['task_id'], 'co': task['co'], 'workload': {
+        'id': task['task_id'], 'inputs': task['inputs'], 'csv': [], 'selection': task['source_kind']}}
+        for task in explicit['tasks']]}
+    snapshot = monitor.build_snapshot(control(tmp_path), {'plan.json': explicit, 'progress.json': progress},
+                                      {'attempted_at': monitor.utcnow()})
+    assert {row['category'] for row in snapshot['kernels']} == {'moe', 'mla'}
+    assert all(row['workload']['csv'] == [] for row in snapshot['kernels'])
+    assert all(row['workload']['selection'] == 'reviewed_explicit_non_csv' for row in snapshot['kernels'])
+    assert snapshot['coverage_counts']['csv_references'] == 0
+    assert snapshot['counts']['target_count'] == snapshot['counts']['remaining'] == 2
+    assert all(workloads.csv_fields(row)['csv_file'] == workloads.csv_fields(row)['csv_row'] == ''
+               for row in snapshot['kernels'])
+
+
+def test_actual_csv_reference_is_recovered_for_sparse_progress_workload(tmp_path):
+    progress = {'kernels': [{'task_id': 'task-a', 'co': 'same.co',
+        'workload': {'id': 'task-a', 'inputs': {'m': 192, 'n': 1280, 'k': 1024}, 'csv': []}}]}
+    snapshot = monitor.build_snapshot(control(tmp_path), {'plan.json': plan(), 'progress.json': progress},
+                                      {'attempted_at': monitor.utcnow()})
+    row = next(row for row in snapshot['kernels'] if row['task_id'] == 'task-a')
+    assert row['workload']['csv'] == [{'path': 'exact.csv', 'sha256': 'abc', 'line': 5}]

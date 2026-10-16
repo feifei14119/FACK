@@ -208,8 +208,10 @@ def build_snapshot(control, documents, sync, previous=None, final=False):
         if row.get('task_id') or row.get('workload_id'):
             normalized = workloads.workload(row)
             prior = planned.get(workloads.key(row))
-            if prior and not normalized.get('csv'):
-                normalized['csv'] = prior['workload']['csv']
+            if prior and not normalized.get('csv') and normalized.get('selection') != 'reviewed_explicit_non_csv':
+                recorded_csv = [ref for ref in prior['workload'].get('csv', []) if ref.get('path')]
+                if recorded_csv:
+                    normalized['csv'] = recorded_csv
             row['workload'] = normalized
     current_id = progress.get('current_task_id') or progress.get('current')
     current_row = next((row for row in kernels if workloads.key(row) == current_id), {})
