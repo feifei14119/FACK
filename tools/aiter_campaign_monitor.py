@@ -253,7 +253,37 @@ def build_snapshot(control, documents, sync, previous=None, final=False):
     }
     if plan:
         snapshot.update(workloads.coverage(plan, kernels, remaining))
+        reasons = plan.get('adapter_blocked_reasons')
+        if isinstance(reasons, dict):
+            snapshot['adapter_coverage'] = {'source': 'plan.json:adapter_blocked_reasons',
+                'reasons': reasons, 'count': len(reasons)}
     return snapshot
+
+
+def publication_summary(root, campaign_id):
+    """Read only the supervisor's fixed local receipt index, never publish."""
+    path = Path(root) / 'manager-status.json'
+    if not path.exists():
+        return {}
+    try:
+        if path.is_symlink() or path.stat().st_size > 1024 * 1024:
+            raise ValueError('invalid local publication status path or size')
+        state = json.loads(path.read_text())
+        if state.get('campaign_id') != campaign_id:
+            raise ValueError('local publication campaign identity mismatch')
+        receipts = state.get('receipts') or {}
+        errors = state.get('errors') or {}
+        if not isinstance(receipts, dict) or not isinstance(errors, dict):
+            raise ValueError('invalid local publication receipt index')
+        published = [row for row in receipts.values() if isinstance(row, dict) and row.get('status') == 'published']
+        latest = max(published, key=lambda row: row.get('checked_at', ''), default={})
+        return {'source': str(path), 'status': state.get('status'), 'updated_at': state.get('updated_at'),
+                'published': len(published), 'skipped': sum(isinstance(row, dict) and row.get('status') == 'skipped'
+                                                         for row in receipts.values()),
+                'error_count': len(errors), 'errors': errors, 'latest_commit': latest.get('commit'),
+                'connection_error': state.get('connection_error')}
+    except (OSError, ValueError, AttributeError, TypeError) as exc:
+        return {'source': str(path), 'status': 'read_failed', 'error': str(exc)}
 
 
 def sync_once(control, final=False, fetcher=fetch_remote):
@@ -276,6 +306,7 @@ def sync_once(control, final=False, fetcher=fetch_remote):
         sync['errors'] = {'communication': str(exc)}
     documents = {name: read_json(root / 'remote' / name) for name in FILES}
     snapshot = build_snapshot(control, documents, sync, previous, final)
+    snapshot['local_publication'] = publication_summary(root, control['campaign_id'])
     if final:
         state = envelope.get('container_state') if sync['connected'] else None
         snapshot['gpu_stop'] = {'status': 'stop_unverified', 'container': control.get('container'),
@@ -425,6 +456,17 @@ def markdown_report(snapshot, final=False):
     if snapshot.get('completion'):
         lines += ['尝试与关联比较进度：`%s`。已尝试不等于通过完成验收；失败与待适配项仍保留在未完成清单。' %
                   cell(snapshot['completion']), '']
+    if snapshot.get('adapter_coverage'):
+        coverage = snapshot['adapter_coverage']
+        lines += ['适配覆盖原因：来自 `%s` 的 **%d** 个 .co 原始原因，见 '
+                  '[adapter-coverage-reasons.csv](adapter-coverage-reasons.csv)。'
+                  '这是适配覆盖记录，部分对象另有显式可运行任务；不表示全部未调优，也不与 CSV 覆盖数量合并。' %
+                  (cell(coverage['source']), coverage['count']), '']
+    if snapshot.get('local_publication'):
+        publication = snapshot['local_publication']
+        lines += ['本机发布回执（只读主管索引）：状态 `%s`；成功 **%s**；错误 **%s**；最新 commit `%s`。' %
+                  (cell(publication.get('status')), cell(publication.get('published')),
+                   cell(publication.get('error_count')), cell(publication.get('latest_commit'))), '']
     if snapshot.get('row_identity') == 'workload':
         lines += ['计数单位为独立 workload；同一 .co 的不同尺寸不会合并。', '',
                   'CSV 覆盖：`%s`。全部未调优 workload 与 .co 原因分别保存为 '
@@ -512,6 +554,14 @@ def write_report(control, snapshot, final=False):
                                  'report': snapshot['latest_report'], 'counts': snapshot['counts'],
                                  'phase': snapshot['phase'], 'status': snapshot['status'],
                                  'sync': snapshot['sync']}, ensure_ascii=False) + '\n')
+    adapter_coverage = snapshot.get('adapter_coverage')
+    if adapter_coverage:
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=['co', 'reason', 'source'])
+        writer.writeheader()
+        for co, reason in sorted(adapter_coverage['reasons'].items()):
+            writer.writerow({'co': co, 'reason': reason, 'source': adapter_coverage['source']})
+        (root / 'adapter-coverage-reasons.csv').write_text(output.getvalue(), encoding='utf-8')
     workload_fields = ['task_id', 'workload_id', 'm', 'n', 'k', 'csv_file', 'csv_row'] if snapshot.get('row_identity') == 'workload' else []
     for filename, rows, fields in (
             ('remaining-workloads.csv', snapshot.get('remaining_workloads'),

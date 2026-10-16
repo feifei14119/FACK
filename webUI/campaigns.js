@@ -34,6 +34,8 @@
         const winningRow = campaign.winner && (campaign.kernels || []).find(r =>
           window.FACKWorkloadView.key(r) === (campaign.winner.task_id || campaign.winner.workload_id));
         const assessment = campaign.winner && (campaign.winner.coverage_assessment || campaign.winner.assess_summary || {});
+        const adapterCoverage = campaign.adapter_coverage || {};
+        const publication = campaign.local_publication || {};
         const stopCondition = campaign.stop_condition === 'all_runnable_workloads_completed' ?
           '全部可调优任务完成，关联尺寸比较结束并确认专用容器停止；失败与待适配项仍列为未完成' :
           campaign.stop_condition === 'first_confirmed_winner' ? '首个严格确认胜出，并确认专用容器停止' :
@@ -60,6 +62,14 @@
             '；关联尺寸比较完成：' + esc(campaign.completion.associations_finished) +
             '。已尝试不等于通过完成验收；失败与待适配项仍保留在未完成清单。</p>' : '') +
           '<p class="desc">类别：' + esc(JSON.stringify(campaign.category_counts || {})) + '</p>' +
+          (adapterCoverage.reasons ? '<details data-detail-key="adapter-coverage-' + esc(campaign.campaign_id) + '"><summary>适配覆盖原因 · ' +
+            esc(adapterCoverage.count) + ' 个 .co 原始记录</summary><p>来源：' + esc(adapterCoverage.source) +
+            '。部分对象另有显式可运行任务；这里不表示全部未调优，也不与 CSV 覆盖数量合并。完整原始原因保存在本机 adapter-coverage-reasons.csv。</p><pre>' +
+            esc(JSON.stringify(Object.entries(adapterCoverage.reasons).filter(([co, reason]) => !query ||
+              (co + ' ' + reason).toLowerCase().includes(query)).map(([co, reason]) => ({co, reason})), null, 2)) + '</pre></details>' : '') +
+          (publication.status ? '<p class="desc">本机发布回执（只读主管索引）：' + esc(publication.status) +
+            '；成功 ' + esc(publication.published) + '；错误 ' + esc(publication.error_count) +
+            '；最新 commit ' + esc(publication.latest_commit) + '。</p>' : '') +
           (campaign.coverage_counts ? '<details data-detail-key="coverage-' + esc(campaign.campaign_id) + '"><summary>CSV / .co 覆盖与未调优原因 · ' +
             esc(campaign.coverage_counts.csv_references) + ' 条引用 / ' + esc(campaign.coverage_counts.known_co) + ' 个 .co</summary>' +
             '<p>剩余 workload ' + esc(campaign.coverage_counts.remaining_workloads) + '；无引用 .co ' + esc(campaign.coverage_counts.unreferenced_co) +
@@ -87,7 +97,8 @@
             remote_counts: campaign.remote_counts, notes: campaign.notes, gpu_stop: campaign.gpu_stop,
             diagnostic_history: campaign.diagnostic_history,
             local_diagnostic_sync: campaign.local_diagnostic_sync,
-            local_exports: campaign.local_exports || {status: '尚未取回；下表为远端产物'}
+            local_exports: campaign.local_exports || {status: '尚未取回；下表为远端产物'},
+            local_publication: publication
           }, null, 2)) + '</pre></details>' +
           '<p class="desc">显示 ' + rows.length + ' / ' + (campaign.kernels || []).length + ' 个运行条目；同 .co 不同尺寸独立计数。</p>' +
           '<div class="campaign-table-wrap"><table class="campaign-table"><thead><tr><th>.co / 类别</th><th>状态 / 结果阶段</th><th>原因</th><th>测试 workload / 实际性能</th><th>任务与产物</th></tr></thead><tbody>' +

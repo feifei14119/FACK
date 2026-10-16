@@ -148,6 +148,9 @@ test('full campaign page distinguishes attempts from completed validation and de
     remote_updated_at:new Date().toISOString(), deadline:null,
     stop_condition:'all_runnable_workloads_completed', sync:{connected:true},
     completion:{attempted_tasks:2,total_tasks:2,associations_finished:false},
+    adapter_coverage:{source:'plan.json:adapter_blocked_reasons',count:2,
+      reasons:{'a.co':'other contracts not adapted','b.co':'keep <original> reason'}},
+    local_publication:{status:'watching',published:1,error_count:0,latest_commit:'abc123'},
     counts:{known:2,target_count:2,finished:1,remaining:1}, kernels:[]};
   const context = {document:{querySelector:selector => selector === '#campaignsBox' ? box : inputs},
     window:{FACKCampaignView:view, FACKWorkloadView:require('./workload_view.js')},
@@ -160,4 +163,8 @@ test('full campaign page distinguishes attempts from completed validation and de
   assert.match(box.innerHTML, /已完成 1；待完成 1/);
   assert.match(box.innerHTML, /已尝试不等于通过完成验收/);
   assert.doesNotMatch(box.innerHTML, /首个严格确认胜出/);
+  assert.match(box.innerHTML, /适配覆盖原因 · 2 个 .co 原始记录/);
+  assert.match(box.innerHTML, /keep &lt;original&gt; reason/);
+  assert.match(box.innerHTML, /不表示全部未调优，也不与 CSV 覆盖数量合并/);
+  assert.match(box.innerHTML, /成功 1；错误 0；最新 commit abc123/);
 });

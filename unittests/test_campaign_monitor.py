@@ -283,3 +283,37 @@ def test_full_campaign_waits_for_fresh_container_stop_before_finalizing(tmp_path
 def test_unspecified_unlimited_monitor_does_not_imply_first_winner():
     assert '未声明' in monitor.stop_condition_label({'deadline': None})
     assert '首个' not in monitor.stop_condition_label({'deadline': None})
+
+
+def test_adapter_coverage_reasons_are_exported_without_changing_workload_completion(tmp_path):
+    import csv
+    control = config(tmp_path)
+    reasons = {'a.co': 'other contracts remain unadapted', 'b.co': 'unsupported, keep original reason'}
+    snapshot = monitor.sync_once(control, fetcher=lambda _: {'files': {
+        'plan.json': {'tasks': [{'task_id': 'one', 'co': 'a.co'}], 'adapter_blocked_reasons': reasons},
+        'progress.json': {'kernels': [{'task_id': 'one', 'co': 'a.co', 'status': 'completed',
+                                      'metrics': {'campaign_decision': 'original_retained'}}]}}, 'errors': {}})
+    monitor.write_report(control, snapshot)
+    assert snapshot['adapter_coverage']['reasons'] == reasons
+    assert snapshot['counts']['finished'] == snapshot['counts']['target_count'] == 1
+    assert snapshot['remaining'] == []
+    rows = list(csv.DictReader((tmp_path / 'adapter-coverage-reasons.csv').open()))
+    assert {row['co']: row['reason'] for row in rows} == reasons
+    assert {row['source'] for row in rows} == {'plan.json:adapter_blocked_reasons'}
+    report = monitor.markdown_report(snapshot)
+    assert '部分对象另有显式可运行任务' in report and '不表示全部未调优' in report
+
+
+def test_local_publication_summary_reads_only_matching_receipts(tmp_path):
+    path = tmp_path / 'manager-status.json'
+    state = {'campaign_id': 'test', 'status': 'watching', 'receipts': {
+        'one': {'status': 'published', 'commit': 'first', 'checked_at': '2026-10-16T00:00:00Z'},
+        'two': {'status': 'published', 'commit': 'second', 'checked_at': '2026-10-16T00:01:00Z'},
+        'three': {'status': 'skipped'}}, 'errors': {'four': {'error': 'verification failed'}}}
+    original = json.dumps(state)
+    path.write_text(original)
+    summary = monitor.publication_summary(tmp_path, 'test')
+    assert summary['published'] == 2 and summary['skipped'] == 1 and summary['error_count'] == 1
+    assert summary['latest_commit'] == 'second'
+    assert path.read_text() == original
+    assert monitor.publication_summary(tmp_path, 'other')['status'] == 'read_failed'
